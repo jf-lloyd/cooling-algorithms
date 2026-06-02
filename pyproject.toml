@@ -1,0 +1,17 @@
+[project]
+name = "cooling-algorithms"
+version = "0.1.0"
+description = "Cooling algorithm simulation code using Google's cirq and qsim."
+requires-python = ">=3.10"
+
+# NOTE: runtime dependencies (cirq, qsim, quspin, numpy, pandas, scipy, ...)
+# are intentionally NOT listed here. They are managed by conda so that pip
+# does not try to resolve/reinstall them and fight the conda environment.
+# pyproject.toml's only job here is to register the `cooling` package itself.
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["cooling*"]
