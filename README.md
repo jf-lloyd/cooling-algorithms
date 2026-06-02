@@ -12,5 +12,5 @@ The code has several main modules:
 - measure.py (defines what observables to record during simulation)
   
 and currently 'helper' modules:
-- ed.py (exact diagonalisation for different models, using qspin -- should probably be merged with model.py)
+- ed.py (exact diagonalisation for different models, using QuSpin -- should probably be merged with model.py)
 - fermion.py (free fermion simulation) 
