@@ -13,4 +13,10 @@ The code has several main modules:
   
 and currently 'helper' modules:
 - ed.py (exact diagonalisation for different models, using QuSpin -- should probably be merged with model.py)
-- fermion.py (free fermion simulation) 
+- fermion.py (free fermion simulation)
+
+## Installation 
+**todo**
+
+## Minimal example
+**todo**
