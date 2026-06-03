@@ -18,6 +18,12 @@ class Lattice(ABC):
         """Total number of sites."""
         return self._Ns
 
+    @property
+    @abstractmethod
+    def name(self):
+        """Return a string identifier for this lattice (e.g. 'chain1D_L8')."""
+        pass
+
     @abstractmethod
     def coords(self, s):
         """Return coordinates (x,y,z..) for site index s."""
@@ -32,6 +38,15 @@ class Lattice(ABC):
     def nearest_neighbours(self, s):
         """Yield all nearest neighbours of site s."""
         pass
+
+    def is_wrap_bond(self, s: int, t: int) -> bool:
+        """Return True if bond (s, t) crosses a periodic boundary. Default: False."""
+        return False
+
+    def draw_coords(self, s: int):
+        """Cartesian coordinates for visualisation. Defaults to coords(s).
+        Override for non-rectangular geometries (e.g. triangular lattice)."""
+        return self.coords(s)
 
     def nearest_neighbour_pairs(self):
         """Return undirected neighbour pairs (s, t) with s < t."""

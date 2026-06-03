@@ -8,7 +8,7 @@ import cirq
 
 class CoolingDevice():
     
-    def __init__(self, system_qubits, bath_qubits, *, cirq_device=None, lattice=None):
+    def __init__(self, system_qubits: list, bath_qubits: list, *, cirq_device=None, lattice: "Lattice | None" = None):
 
         self._system_qubits = list(system_qubits)
         self._bath_qubits   = list(bath_qubits)
@@ -21,14 +21,14 @@ class CoolingDevice():
         self._check_disjoint()
 
     @classmethod
-    def from_lattice(cls, lattice, Nb):
+    def from_lattice(cls, lattice: "Lattice", Nb: int=0):
         """Build system qubits from a Lattice object; Nb bath qubits without geometry."""
         system = [cirq.NamedQubit(f"s{s}") for s in range(lattice.Ns)]
         bath   = [cirq.NamedQubit(f"b{i}")   for i in range(Nb)]
         return cls(system, bath, lattice=lattice)
 
     @classmethod
-    def from_cirq_device(cls, cirq_device, system_qubits, bath_qubits, lattice=None):
+    def from_cirq_device(cls, cirq_device, system_qubits: list, bath_qubits: list, lattice: "Lattice | None" = None):
         """Build directly from a cirq Device. The partition of Device qubits into
         system and bath qubits must be given. If lattice is not provided, builds a
         GraphLattice reflecting device geometry.
@@ -108,27 +108,30 @@ class CoolingDevice():
         if overlap:
             raise ValueError(f"System and bath qubits overlap: {overlap}")
 
-    def draw(self, ax=None, stub_length=0.4):
+    def draw(self, ax=None, labels: bool = False):
         """
         Visualise the device as a graph. System qubits are drawn black, bath
         qubits red. Each bond-colouring layer is drawn in its own colour.
         
         """
+        if self._lattice is None:
+            raise ValueError("Cannot draw device: no lattice provided.")
+
         import networkx as nx
         import matplotlib.pyplot as plt
-        from matplotlib import cm
-        
+
         if ax is None:
             _, ax = plt.subplots()
         
         G = nx.Graph()
         pos = {}
         color = {}
+        stub_length = 0.4
         
         # --- system qubit positions ---
         for s, q in enumerate(self._system_qubits):
             try:
-                c = self._lattice.coords(s)
+                c = self._lattice.draw_coords(s)
                 pos[q] = (c[0], c[1] if len(c) > 1 else 0)
             except NotImplementedError:
                 pos[q] = (s, 0)
@@ -150,21 +153,19 @@ class CoolingDevice():
         nx.draw_networkx_nodes(G, pos=pos,
                                node_color=[color[q] for q in G.nodes()],
                                node_size=150, ax=ax)
-        nx.draw_networkx_labels(G, pos=pos, font_size=7, ax=ax)
+        if labels:
+            sys_labels  = {q: str(q) for q in self._system_qubits}
+            bath_labels = {q: str(q) for q in self._bath_qubits}
+            nx.draw_networkx_labels(G, pos=pos, labels=sys_labels,  font_size=7, font_color='white', ax=ax)
+            nx.draw_networkx_labels(G, pos=pos, labels=bath_labels, font_size=7, font_color='black', ax=ax)
         
         # --- bonds per colouring layer ---
         palette = plt.colormaps["tab10"]
         
-        def is_wrap(s, t):
-            """True if bond (s,t) crosses a periodic boundary."""
-            cs = self._lattice.coords(s)
-            ct = self._lattice.coords(t)
-            return any(abs(cs[d] - ct[d]) > 1 for d in range(len(cs)))
-        
         def stub_ghosts(s, t):
-            """Return (ghost_s_pos, ghost_t_pos) for a wrap bond."""
-            cs = list(self._lattice.coords(s))
-            ct = list(self._lattice.coords(t))
+            """Return (ghost_s_pos, ghost_t_pos) for a wrap bond, in draw_coords space."""
+            cs = list(self._lattice.draw_coords(s))
+            ct = list(self._lattice.draw_coords(t))
             gs, gt = list(cs), list(ct)
             for d in range(len(cs)):
                 diff = ct[d] - cs[d]
@@ -172,17 +173,14 @@ class CoolingDevice():
                     gs[d] = cs[d] - stub_length if diff > 0 else cs[d] + stub_length
                     gt[d] = ct[d] + stub_length if diff > 0 else ct[d] - stub_length
             return tuple(gs), tuple(gt)
-        
+
         bond_layers = self._lattice.bond_colouring()
         for li, layer in enumerate(bond_layers):
             c = palette(li % 10)
             regular = []
             for (s, t) in layer:
                 qs, qt = self._system_qubits[s], self._system_qubits[t]
-                try:
-                    wrap = is_wrap(s, t)
-                except NotImplementedError:
-                    wrap = False
+                wrap = self._lattice.is_wrap_bond(s, t)
         
                 if wrap:
                     # draw two short dashed stubs instead of a long wrap edge
@@ -202,7 +200,7 @@ class CoolingDevice():
         # build legend entries for all layers (including stub-only layers)
         n_layers = len(bond_layers)
         handles = [plt.Line2D([0], [0], color=palette(li % 10), linewidth=2,
-                               label=f"layer {li}")
+                               label=f"layer {li+1}")
                    for li in range(n_layers)]
         ax.legend(handles=handles, fontsize=7, loc="best")
         # ax.set_aspect("equal")

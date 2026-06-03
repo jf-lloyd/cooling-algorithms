@@ -12,7 +12,7 @@ class SquareLattice2D(Lattice):
     Site numbering: s = x + y*Lx
     """
 
-    def __init__(self, Lx, Ly, pbc_x=False, pbc_y=False):
+    def __init__(self, Lx: int, Ly: int, pbc_x: bool = False, pbc_y: bool = False):
         self._Lx = Lx
         self._Ly = Ly
         self._Ns = Lx * Ly
@@ -24,6 +24,10 @@ class SquareLattice2D(Lattice):
 
     @property
     def Ly(self): return self._Ly
+
+    @property
+    def name(self):
+        return f"square2D_Lx{self._Lx}Ly{self._Ly}"
 
     def coords(self, s):
         x = s % self._Lx
@@ -61,6 +65,11 @@ class SquareLattice2D(Lattice):
         elif self.pbc_y:
             yield self.index(x, self._Ly - 1)
 
+    def is_wrap_bond(self, s: int, t: int) -> bool:
+        xs, ys = self.coords(s)
+        xt, yt = self.coords(t)
+        return (self.pbc_x and abs(xt - xs) > 1) or (self.pbc_y and abs(yt - ys) > 1)
+
     def boundary(self):
         seen = set()
         bry = []
@@ -91,7 +100,7 @@ class SquareLattice2D(Lattice):
  
         X_even, X_odd, X_seam = [], [], []
         for y in range(Ly):
-            n_bonds = Lx if self.pbc_x else Lx - 1
+            n_bonds = Lx if (self.pbc_x and Lx > 2) else Lx - 1
             for ix in range(n_bonds):
                 s, t = self.index(ix, y), self.index((ix + 1) % Lx, y)
                 bond = (min(s, t), max(s, t))
@@ -104,7 +113,7 @@ class SquareLattice2D(Lattice):
  
         Y_even, Y_odd, Y_seam = [], [], []
         for x in range(Lx):
-            n_bonds = Ly if self.pbc_y else Ly - 1
+            n_bonds = Ly if (self.pbc_y and Ly > 2) else Ly - 1
             for iy in range(n_bonds):
                 s, t = self.index(x, iy), self.index(x, (iy + 1) % Ly)
                 bond = (min(s, t), max(s, t))

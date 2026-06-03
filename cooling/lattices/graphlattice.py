@@ -14,7 +14,7 @@ class GraphLattice(Lattice):
     whose edges are the nearest-neighbour bonds. 
     """
 
-    def __init__(self, graph, coords=None):
+    def __init__(self, graph, coords: dict | None = None):
         """
         graph  : networkx.Graph with integer nodes 0..Ns-1.
         coords : optional {site_index: (x, y)} for drawing only.
@@ -35,6 +35,10 @@ class GraphLattice(Lattice):
     @property
     def graph(self):
         return self._graph
+
+    @property
+    def name(self):
+        return f"graph_N{self._Ns}"
 
     def coords(self, s):
         if self._coords is None:

@@ -12,7 +12,7 @@ class ChainLattice1D(Lattice):
     Sites labelled 0,...,L−1.
     """
 
-    def __init__(self, L, pbc=False):
+    def __init__(self, L: int, pbc: bool = False):
         self._L = L
         self._Ns = L
         self.pbc = pbc
@@ -20,6 +20,10 @@ class ChainLattice1D(Lattice):
     @property
     def L(self):
         return self._L
+
+    @property
+    def name(self):
+        return f"chain1D_L{self._L}"
 
     def coords(self, s):
         return (s,)
@@ -41,6 +45,9 @@ class ChainLattice1D(Lattice):
         elif self.pbc:
             yield self.L - 1
 
+    def is_wrap_bond(self, s: int, t: int) -> bool:
+        return self.pbc and abs(s - t) > 1
+
     def boundary(self):
         if self.pbc:
             return []
@@ -55,7 +62,7 @@ class ChainLattice1D(Lattice):
           bond that would collide is placed in a third layer.
     
         """
-        n_bonds = self._L if self.pbc else self._L - 1
+        n_bonds = self._L if (self.pbc and self._L > 2) else self._L - 1
         even, odd, seam = [], [], []
         for ix in range(n_bonds):
             s, t = ix, (ix + 1) % self._L

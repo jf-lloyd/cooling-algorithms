@@ -1,2 +1,3 @@
-from .lattices import Lattice, ChainLattice1D, SquareLattice2D
+from .lattices import Lattice, ChainLattice1D, SquareLattice2D, TriangularLattice2D, GraphLattice
 from .device import CoolingDevice
+from .models import Model, IsingModel, HeisenbergModel
