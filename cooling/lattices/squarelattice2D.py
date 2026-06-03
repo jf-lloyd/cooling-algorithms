@@ -1,4 +1,8 @@
-from .base import Lattice
+"""
+A 2D square lattice. 
+"""
+
+from .latticebase import Lattice
 
 class SquareLattice2D(Lattice):
     """
@@ -10,7 +14,6 @@ class SquareLattice2D(Lattice):
         self._Lx = Lx
         self._Ly = Ly
         self._Ns = Lx * Ly
-        self._Dim = 2
         self.pbc_x = pbc_x
         self.pbc_y = pbc_y
 
@@ -67,3 +70,41 @@ class SquareLattice2D(Lattice):
                 bry.append(self.index(l, 0))
                 bry.append(self.index(l, self.Ly-1))
         return bry
+
+    def bond_colouring(self):
+        """Per-direction even/odd colouring.
+ 
+        X-bonds and Y-bonds never share a layer (so they cannot collide with
+        each other); within each direction the bonds form parallel 1D chains
+        coloured even/odd by traversal index, with a third "seam" layer for an
+        odd-length periodic direction (odd cycle, not 2-colourable).
+
+        """
+        Lx, Ly = self._Lx, self._Ly
+ 
+        X_even, X_odd, X_seam = [], [], []
+        for y in range(Ly):
+            n_bonds = Lx if self.pbc_x else Lx - 1
+            for ix in range(n_bonds):
+                bond = (self.index(ix, y), self.index((ix + 1) % Lx, y))
+                if self.pbc_x and Lx % 2 == 1 and ix == Lx - 1:
+                    X_seam.append(bond)
+                elif ix % 2 == 0:
+                    X_even.append(bond)
+                else:
+                    X_odd.append(bond)
+ 
+        Y_even, Y_odd, Y_seam = [], [], []
+        for x in range(Lx):
+            n_bonds = Ly if self.pbc_y else Ly - 1
+            for iy in range(n_bonds):
+                bond = (self.index(x, iy), self.index(x, (iy + 1) % Ly))
+                if self.pbc_y and Ly % 2 == 1 and iy == Ly - 1:
+                    Y_seam.append(bond)
+                elif iy % 2 == 0:
+                    Y_even.append(bond)
+                else:
+                    Y_odd.append(bond)
+ 
+        layers = [X_even, X_odd, X_seam, Y_even, Y_odd, Y_seam]
+        return [layer for layer in layers if layer]

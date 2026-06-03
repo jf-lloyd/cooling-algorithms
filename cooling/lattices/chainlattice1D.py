@@ -1,4 +1,8 @@
-from .base import Lattice
+"""
+A 1D lattice.
+"""
+
+from .latticebase import Lattice
 
 class ChainLattice1D(Lattice):
     """
@@ -9,7 +13,6 @@ class ChainLattice1D(Lattice):
     def __init__(self, L, pbc=False):
         self._L = L
         self._Ns = L
-        self._Dim = 1
         self.pbc = pbc
 
     @property
@@ -41,3 +44,23 @@ class ChainLattice1D(Lattice):
             return []
         else:
             return [0, self.L-1]
+
+    def bond_colouring(self):
+        """Even/odd 2-colouring.
+    
+        - open chain or even-length ring: 2 layers (minimal).
+        - odd-length ring: an odd cycle is not 2-colourable, so the single
+          bond that would collide is placed in a third layer.
+    
+        """
+        n_bonds = self._L if self.pbc else self._L - 1
+        even, odd, seam = [], [], []
+        for ix in range(n_bonds):
+            bond = (ix, (ix + 1) % self._L)
+            if self.pbc and self._L % 2 == 1 and ix == self._L - 1:
+                seam.append(bond)          # wrap bond on an odd ring
+            elif ix % 2 == 0:
+                even.append(bond)
+            else:
+                odd.append(bond)
+        return [layer for layer in (even, odd, seam) if layer]
