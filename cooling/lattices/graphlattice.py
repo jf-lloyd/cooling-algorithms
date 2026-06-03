@@ -42,6 +42,7 @@ class GraphLattice(Lattice):
         return self._coords[s]
 
     def index(self, *coords):
+        # Graph lattices have no coordinate system; index is the site label itself.
         (s,) = coords
         return s
 

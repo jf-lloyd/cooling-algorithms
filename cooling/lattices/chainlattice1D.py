@@ -56,7 +56,10 @@ class ChainLattice1D(Lattice):
         n_bonds = self._L if self.pbc else self._L - 1
         even, odd, seam = [], [], []
         for ix in range(n_bonds):
-            bond = (ix, (ix + 1) % self._L)
+            s, t = ix, (ix + 1) % self._L
+            if s > t:
+                s, t = t, s
+            bond = (s, t)
             if self.pbc and self._L % 2 == 1 and ix == self._L - 1:
                 seam.append(bond)          # wrap bond on an odd ring
             elif ix % 2 == 0:

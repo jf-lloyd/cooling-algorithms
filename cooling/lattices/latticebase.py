@@ -6,9 +6,7 @@ Provides a "bond colouring" which partitions system bonds into commuting/disjoin
 from abc import ABC, abstractmethod    
 
 class Lattice(ABC):
-    """
-    write
-    """
+    """Abstract base class defining qubit geometry and nearest-neighbour connectivity."""
 
     def __init__(self):
         self._Ns = None

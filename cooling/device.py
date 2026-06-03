@@ -27,17 +27,16 @@ class CoolingDevice():
 
     @classmethod
     def from_cirq_device(cls, cirq_device, system_qubits, bath_qubits, lattice=None):
-        """Build directly from a cirq Device. The partition of Device qubits into 
-        system and bath qubits must be given. If lattice is not provided, builds a 
-        GraphLattice reflecting device geometry"""
+        """Build directly from a cirq Device. The partition of Device qubits into
+        system and bath qubits must be given. If lattice is not provided, builds a
+        GraphLattice reflecting device geometry.
+
+        Unused device qubits (neither system nor bath) are silently ignored."""
         device_qubits = set(cirq_device.metadata.qubit_set)
         joint = set(system_qubits) | set(bath_qubits)
-        stray   = joint - device_qubits
-        missing = device_qubits - joint
+        stray = joint - device_qubits
         if stray:
             raise ValueError(f"Qubits not on the device: {stray}")
-        if missing:
-            raise ValueError(f"Device qubits left unassigned: {missing}")
     
         if lattice is None:
             lattice = cls._lattice_from_device(cirq_device, system_qubits)
@@ -116,7 +115,6 @@ class CoolingDevice():
         import networkx as nx
         import matplotlib.pyplot as plt
         from matplotlib import cm
-        import math
         
         if ax is None:
             _, ax = plt.subplots()
@@ -173,7 +171,8 @@ class CoolingDevice():
                     gt[d] = ct[d] + stub_length if diff > 0 else ct[d] - stub_length
             return tuple(gs), tuple(gt)
         
-        for li, layer in enumerate(self._lattice.bond_colouring()):
+        bond_layers = self._lattice.bond_colouring()
+        for li, layer in enumerate(bond_layers):
             c = palette(li % 10)
             regular = []
             for (s, t) in layer:
@@ -199,7 +198,7 @@ class CoolingDevice():
                                        width=2, ax=ax, label=f"layer {li}")
         
         # build legend entries for all layers (including stub-only layers)
-        n_layers = len(self._lattice.bond_colouring())
+        n_layers = len(bond_layers)
         handles = [plt.Line2D([0], [0], color=palette(li % 10), linewidth=2,
                                label=f"layer {li}")
                    for li in range(n_layers)]

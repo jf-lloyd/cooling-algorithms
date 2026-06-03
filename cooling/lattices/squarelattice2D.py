@@ -60,15 +60,20 @@ class SquareLattice2D(Lattice):
             yield self.index(x, self._Ly - 1)
 
     def boundary(self):
+        seen = set()
         bry = []
+        def add(s):
+            if s not in seen:
+                seen.add(s)
+                bry.append(s)
         if self.pbc_x is False:
             for l in range(self.Ly):
-                bry.append(self.index(0, l))
-                bry.append(self.index(self.Lx-1,l))
+                add(self.index(0, l))
+                add(self.index(self.Lx - 1, l))
         if self.pbc_y is False:
             for l in range(self.Lx):
-                bry.append(self.index(l, 0))
-                bry.append(self.index(l, self.Ly-1))
+                add(self.index(l, 0))
+                add(self.index(l, self.Ly - 1))
         return bry
 
     def bond_colouring(self):
@@ -86,7 +91,8 @@ class SquareLattice2D(Lattice):
         for y in range(Ly):
             n_bonds = Lx if self.pbc_x else Lx - 1
             for ix in range(n_bonds):
-                bond = (self.index(ix, y), self.index((ix + 1) % Lx, y))
+                s, t = self.index(ix, y), self.index((ix + 1) % Lx, y)
+                bond = (min(s, t), max(s, t))
                 if self.pbc_x and Lx % 2 == 1 and ix == Lx - 1:
                     X_seam.append(bond)
                 elif ix % 2 == 0:
@@ -98,7 +104,8 @@ class SquareLattice2D(Lattice):
         for x in range(Lx):
             n_bonds = Ly if self.pbc_y else Ly - 1
             for iy in range(n_bonds):
-                bond = (self.index(x, iy), self.index(x, (iy + 1) % Ly))
+                s, t = self.index(x, iy), self.index(x, (iy + 1) % Ly)
+                bond = (min(s, t), max(s, t))
                 if self.pbc_y and Ly % 2 == 1 and iy == Ly - 1:
                     Y_seam.append(bond)
                 elif iy % 2 == 0:
