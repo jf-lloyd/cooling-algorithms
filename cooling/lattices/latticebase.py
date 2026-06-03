@@ -1,6 +1,8 @@
 """
-Base class Lattice object. Defines geometry and qubit-qubit connectivity for system. 
+Base class Lattice object. Defines geometry and qubit-qubit connectivity for system.
 Provides a "bond colouring" which partitions system bonds into commuting/disjoint sets (used later for evolution)
+
+Created by Jerome Lloyd on 3rd June 2026
 """
 
 from abc import ABC, abstractmethod    

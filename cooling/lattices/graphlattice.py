@@ -1,5 +1,7 @@
 """
 A lattice build from a networkx graph -- used to build lattice for pre-built cirq device.
+
+Created by Jerome Lloyd on 3rd June 2026
 """
 
 from .latticebase import Lattice

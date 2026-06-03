@@ -1,5 +1,7 @@
 """
-A 2D square lattice. 
+A 2D square lattice.
+
+Created by Jerome Lloyd on 3rd June 2026
 """
 
 from .latticebase import Lattice

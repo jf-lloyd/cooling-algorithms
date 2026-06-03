@@ -1,5 +1,7 @@
 """
 The CoolingDevice defines the system and bath qubit geometry in cirq. It is initialised either with a "Lattice" object (see lattices) or with a pre-build cirq "Device".
+
+Created by Jerome Lloyd on 3rd June 2026
 """
 
 import cirq

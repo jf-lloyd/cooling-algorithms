@@ -1,5 +1,7 @@
 """
 A 1D lattice.
+
+Created by Jerome Lloyd on 3rd June 2026
 """
 
 from .latticebase import Lattice
