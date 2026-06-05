@@ -16,7 +16,7 @@ from quspin.operators import hamiltonian
 from quspin.basis import spin_basis_general
 
 
-PATH = "spectra/"
+PATH = os.path.join(os.path.dirname(__file__), "..", "data", "spectra") + os.sep
 
 # Basis rotations that make the Hamiltonian compatible with QuSpin's spin-inversion
 # operator prod_i X_i. Each rotation maps the offending single-site field to X
@@ -42,6 +42,7 @@ def _apply_rotation(bonds, rot_map, sign_map):
 
 
 def saver(data, fname, path):
+    os.makedirs(path, exist_ok=True)
     with open(path + fname + '.pkl', 'wb') as f:
         pickle.dump(data, f, protocol=2)
 

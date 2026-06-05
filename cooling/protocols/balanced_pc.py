@@ -209,8 +209,8 @@ class DetailedBalanceProtocol(Protocol):
 
         # non-structural params — may be sympy symbols
         theta  = self.allow_symbolic(params, "theta")
-        default_aPauli = {bi: self.pauli_angles['X'] for bi in coupling_geometry.keys()} # default to XX coupling
-        aPauli = self.allow_symbolic(params, "aPauli", default=default_aPauli)
+        default_aPauli = {bi: self.pauli_angles['X'] for bi in coupling_geometry.keys()}
+        aPauli = {**default_aPauli, **self.allow_symbolic(params, "aPauli", default={})}
 
         # compute filter and derived structure
         filter_f = self.filter_function(beta, delta, h, NT)
