@@ -93,6 +93,11 @@ class CoolingDevice():
         return self._bath_qubits
 
     @property
+    def qubits(self):
+        """list of all qubits (system + bath)"""
+        return self._system_qubits + self._bath_qubits
+
+    @property
     def qubit_index_map(self):
         """map between system qubit names and index"""
         return self._qubit_index_map

@@ -47,6 +47,8 @@ htmlcov/
 
 # --- Local cleanup / scratch ---
 old_cleanup/
+*_old.py
+project_state.md
 
 # --- Editors / OS ---
 .vscode/
