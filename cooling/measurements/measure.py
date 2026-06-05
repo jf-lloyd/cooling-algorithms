@@ -1,10 +1,9 @@
-from abc import ABC, abstractmethod  
 import numpy as np
 import cirq
 
-class Measurement(ABC):
+class Measurement:
     """
-    defines a measurement class to retrieve everything we want from wavefunction
+    Collects observables and evaluates them from a system state vector.
     """
     def __init__(self, device:"Device"):
         self._measures = {} # name : function(wavefunction) -> value
@@ -32,12 +31,6 @@ class Measurement(ABC):
     def add_Hamiltonian(self, model:"Model"):
         operator = model.hamiltonian
         self.add_observable('H0', operator)
-        return self
-
-    def add_local_Hops(self, model:"Model"):
-        operators = model.local_Hops
-        for k, operator in enumerate(operators):
-            self.add_observable(f'h_{k}', operator)
         return self
 
     def add_local_Sops(self):
@@ -69,18 +62,3 @@ class DefaultMeasurement1(Measurement):
         self.add_Hamiltonian(model)
         self.add_total_spin()
 
-class DefaultMeasurement2(Measurement):
-
-
-    def __init__(self, device:"Device", model:"Model"):
-        super().__init__(device) 
-        self.add_local_Hops(model)
-        self.add_local_Sops()
-
-class DefaultMeasurement3(Measurement):
-
-    def __init__(self, device:"Device", model:"Model"):
-        super().__init__(device) 
-        self.add_local_Hops(model)
-        self.add_local_Sops()
-        self.add_Hamiltonian(model)
