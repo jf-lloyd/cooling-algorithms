@@ -1,7 +1,7 @@
 """
 Abstract base class for cooling protocols.
 
-The Protocol returns the cooling channel for given physical parameters. Minimally it defines a reset layer, noise layer, and unitary system-bath layer, which are combined into the channel: the channel is returned as a FrozenCircuit. Some parameters passed to the channel constructor may be symbolic (for use in Scheduler). Different subclasses define different channels. 
+The Protocol returns the cooling channel for given physical parameters. Minimally it defines a reset layer, noise layer, and unitary system-bath layer, which are combined into the channel: the channel is returned as a FrozenCircuit. Different subclasses define different channels.
 
 Created by Jerome Lloyd on 4th June 2026.
 """
@@ -84,7 +84,7 @@ class Protocol(ABC):
     # ______ helpers for getting parameter values _____ 
     
     def require_real(self, params: dict, key: str, default=None):
-        """Get parameter from dict and check that it is a real number (excludes symbolic)."""
+        """Get parameter from dict and check that it is a real number."""
         x = params.get(key, default)
         if x is None:
             raise KeyError(f"Missing required parameter {key!r}")
@@ -92,7 +92,6 @@ class Protocol(ABC):
         if isinstance(x, bool) or not isinstance(x, numbers.Real):
             raise TypeError(
                 f"Parameter {key!r} must be a real number "
-                f"(circuit structure depends on it), "
                 f"got {type(x).__name__}: {x!r}"
             )
 
@@ -107,7 +106,6 @@ class Protocol(ABC):
         if isinstance(x, bool) or not isinstance(x, numbers.Integral):
             raise TypeError(
                 f"Parameter {key!r} must be an integer "
-                f"(circuit structure depends on it), "
                 f"got {type(x).__name__}: {x!r}"
             )
 
@@ -119,8 +117,8 @@ class Protocol(ABC):
     
         return int(x)
 
-    def allow_symbolic(self, params: dict, key: str, default=None):
-        """Get parameter without type restriction."""
+    def get_param(self, params: dict, key: str, default=None):
+        """Get parameter from dict without type restriction."""
         x = params.get(key, default)
         if x is None:
             raise KeyError(f"Missing required parameter {key!r}")

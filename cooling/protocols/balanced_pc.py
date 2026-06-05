@@ -9,21 +9,14 @@ from .protocolbase import Protocol
 
 class DetailedBalanceProtocol(Protocol):
 
-    """ 
-    Detailed balance protocol, using either gaussian filter (arxiv/2506.21318) or 
+    """
+    Detailed balance protocol, using either gaussian filter (arxiv/2506.21318) or
     "modulated coupling protocol" (step-like) filter (arxiv/2404.12175).
-    The code constructs the reset channel for a given Device, Model, coupling geometry and parameters
-    (see channel for required parameters). The channel is returned as a FrozenCircuit that can then 
-    be used by the Simulator; several channel parameters may be symbolic, which allows for time-dependent 
-    scheduling (see Scheduler). 
+    The channel is returned as a FrozenCircuit for a given Device, Model, coupling
+    geometry and parameters (see channel() for required parameters).
 
-    For mixing purposes it is useful to be able to randomly select single Paulis as coupling operators at start
-    of each cycle. To avoid recreating the circuit every time, we instead parameterise the random Paulis by
-    single qubit rotations with parameterised angles (see below re. pauli_angles). The Scheduler can then pass
-    random choices of the pauli_angles at each new cycle, without recreating the circuit.
-
-    Changes to circuit geometry (e.g. random coupling geometry) requires redrawing the circuit. To avoid overhead,
-    caching of random circuits can be handled in the Scheduler.
+    The system coupling operator (X, Y, or Z) is selected per bath qubit via single-qubit
+    rotations Rz(-az)·Ry(-ay)·XX·Ry(ay)·Rz(az). Standard angles are in pauli_angles.
     """
 
     # Rotation angles (az, ay) to select system Pauli: Rz(az)·Ry(ay)·X·Ry(-ay)·Rz(-az) = target Pauli.
@@ -95,9 +88,8 @@ class DetailedBalanceProtocol(Protocol):
 
     def _get_coupling_layer(self, coupling_geometry:dict, theta):
         """
-        Default XX coupling gates for all SB pairs. 
-        The system Pauli can be rotated to Y,Z via single-qubit rotations: see _get_coupling_rotations       
-        theta: coupling strength — float or sympy symbol.
+        Default XX coupling gates for all SB pairs.
+        The system Pauli can be rotated to Y,Z via single-qubit rotations: see _get_coupling_rotations.
         exponent = 2*theta/π so that gate**delta**f[j] → exp(-i·theta·delta·f[j]·XX).
         """
         S = self.device.system_qubits
@@ -111,16 +103,13 @@ class DetailedBalanceProtocol(Protocol):
 
         aPauli: dict {bath_idx: (az, ay)} — keyed by bath qubit index.
                 System qubit retrieved from coupling_geometry.
-                Values are floats or sympy symbols. Use pauli_angles for standard choices.
+                Use pauli_angles for standard X/Y/Z choices.
 
         Returns (pre_ops, post_ops). Ops grouped by gate type so each sub-list
         acts on distinct qubits → cirq packs each into one moment.
         """
         def _nonzero(val):
-            try:
-                return not np.isclose(val, 0)
-            except TypeError:
-                return True  # sympy symbol — can't tell, include it
+            return not np.isclose(val, 0)
 
         S = self.device.system_qubits
         pre_rz, pre_ry, post_ry, post_rz = [], [], [], []
@@ -181,19 +170,16 @@ class DetailedBalanceProtocol(Protocol):
         Requires:
         coupling_geometry   : dict {bath_idx: sys_idx}, system bath coupling geometry
         params              : dict {param_name: value}, channel parameters
-            Required params (S = structural, sets circuit depth and must be real parameter):
-                beta            : float (S) - inverse target temperature
-                delta           : float (S) - trotter angle
-                h               : float (S) - bath splitting
-                theta           : float or sympy  — coupling strength
+            Required params (structural — set circuit depth, must be real):
+                beta            : float — inverse target temperature
+                delta           : float — Trotter angle
+                h               : float — bath splitting
+                theta           : float — coupling strength
             Optional params:
-                NT              : int (S, default 5) — filter truncation / circuit depth parameter
-                aPauli          : dict {bath_idx: (az, ay)}, optional, float or sympy, defaults to XX coupling
+                NT              : int (default 5) — filter truncation / circuit depth
+                aPauli          : dict {bath_idx: (az, ay)}, defaults to XX coupling
 
-        Returns a FrozenCircuit. If theta or aPauli carry sympy symbols the
-        circuit is parameterised and resolved before simulation (allows Scheduling).
-        
-        Use Protocol.draw_channel(coupling_geometry, params) to see channel circuit.
+        Use Protocol.draw_channel(coupling_geometry, params) to visualise the circuit.
         """
         self.validate_geometry(coupling_geometry)
 
@@ -207,10 +193,9 @@ class DetailedBalanceProtocol(Protocol):
             print(f"mcp requires h=π/2; overriding supplied h={h:.4f}")
             h = np.pi / 2
 
-        # non-structural params — may be sympy symbols
-        theta  = self.allow_symbolic(params, "theta")
+        theta  = self.get_param(params, "theta")
         default_aPauli = {bi: self.pauli_angles['X'] for bi in coupling_geometry.keys()}
-        aPauli = {**default_aPauli, **self.allow_symbolic(params, "aPauli", default={})}
+        aPauli = {**default_aPauli, **self.get_param(params, "aPauli", default={})}
 
         # compute filter and derived structure
         filter_f = self.filter_function(beta, delta, h, NT)
