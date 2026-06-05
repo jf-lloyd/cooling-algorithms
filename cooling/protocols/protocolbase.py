@@ -1,7 +1,7 @@
 """
 Abstract base class for cooling protocols.
 
-The Protocol returns the cooling channel for given physical parameters. Minimally it defines a reset layer, noise layer, and unitary system-bath layer, which are combined into the channel: the channel is returned as a FrozenCircuit (default) or as a parameterized circuit (for use in Scheduler). Different subclasses define different channels. 
+The Protocol returns the cooling channel for given physical parameters. Minimally it defines a reset layer, noise layer, and unitary system-bath layer, which are combined into the channel: the channel is returned as a FrozenCircuit. Some parameters passed to the channel constructor may be symbolic (for use in Scheduler). Different subclasses define different channels. 
 
 Created by Jerome Lloyd on 4th June 2026.
 """
@@ -18,8 +18,7 @@ class Protocol(ABC):
     ----------
     device : CoolingDevice
     model  : Model
-    gamma  : float
-        Depolarising noise strength. 0 = off (default).
+    gamma  : float - depolarising noise strength. 0 = off (default).
     """
 
     def __init__(self, device:"CoolingDevice", model:"Model", gamma:float=0.):
@@ -56,7 +55,7 @@ class Protocol(ABC):
     @abstractmethod
     def channel(self, coupling_geometry: dict, params: dict) -> cirq.FrozenCircuit:
         """
-        Build and return one cooling-cycle.
+        Build and return one cooling-cycle. 
         """
         pass
 
