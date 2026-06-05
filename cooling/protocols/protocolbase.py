@@ -64,16 +64,22 @@ class Protocol(ABC):
         """Print the channel description (inc parameters required by channel) for this protocol."""
         print(self.channel.__doc__)
 
-    def draw_channel(self, coupling_geometry: dict, params: dict):
-        """Draw the cooling channel circuit."""
+    def draw_channel(self, coupling_geometry: dict, params: dict, save: str = None):
+        """Draw the cooling channel circuit. Pass save='filename.svg' to save."""
         C = cirq.Circuit(self.channel(coupling_geometry, params))
         print(f"Circuit: {len(C) - 1} moments + reset")
         try:
             from IPython.display import display
+            from cirq.contrib.svg import SVGCircuit
             display(C)
+            if save is not None:
+                svg = SVGCircuit(C)._repr_svg_()
+                with open(save, 'w') as f:
+                    f.write(svg)
+                print(f"Saved to {save}")
         except ImportError:
             print(C)
-
+        return C
 
     # ______ helpers for getting parameter values _____ 
     
