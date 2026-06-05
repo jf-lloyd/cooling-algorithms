@@ -7,14 +7,6 @@ import numpy as np
 import cirq
 from .protocolbase import Protocol
 
-"""
-The default coupling gate is XXPow i.e. exp(-i·angle·X_sys X_bath)
-To switch the system operator to a different Pauli, we apply single-qubit rotations to the system qubit
-Rz(az) · Ry(ay) · X · Ry(-ay) · Rz(-az)
-PAULI_ALPHAS maps target Pauli name → (az, ay) rotation angles. 
-"""
-PAULI_ALPHAS = {'X': (0.0, 0.0), 'Y': (np.pi/2, 0.0), 'Z': (0.0, -np.pi/2)}
-
 class DetailedBalanceProtocol(Protocol):
 
     """ 
@@ -27,12 +19,15 @@ class DetailedBalanceProtocol(Protocol):
 
     For mixing purposes it is useful to be able to randomly select single Paulis as coupling operators at start
     of each cycle. To avoid recreating the circuit every time, we instead parameterise the random Paulis by
-    single qubit rotations with parameterised angles (see above re. PAULI_ALPHAS). The Scheduler can then pass
-    random choices of the PAULI_ALPHAS at each new cycle, without recreating the circuit.
+    single qubit rotations with parameterised angles (see below re. pauli_angles). The Scheduler can then pass
+    random choices of the pauli_angles at each new cycle, without recreating the circuit.
 
     Changes to circuit geometry (e.g. random coupling geometry) requires redrawing the circuit. To avoid overhead,
     caching of random circuits can be handled in the Scheduler.
     """
+
+    # Rotation angles (az, ay) to select system Pauli: Rz(az)·Ry(ay)·X·Ry(-ay)·Rz(-az) = target Pauli.
+    pauli_angles = {'X': (0.0, 0.0), 'Y': (np.pi / 2, 0.0), 'Z': (0.0, -np.pi / 2)}
 
     def __init__(self, device:"CoolingDevice", model:"Model", gamma:float=0., function="gaussian"):
 
@@ -52,6 +47,12 @@ class DetailedBalanceProtocol(Protocol):
     @property
     def name(self):
         return 'no_name'
+
+    @property
+    def print_channel_description(self):
+        """Print the channel description (inc parameters required by channel) for this protocol."""
+        print(f"Using filter function: {self.function}")
+        print(self.channel.__doc__)
 
     # ── Filter functions ──────────────────────────────────────────────────────
 
@@ -78,6 +79,14 @@ class DetailedBalanceProtocol(Protocol):
         f /= delta * np.sum(np.abs(f))   # normalise: delta * Sum|f| = 1
         return f
 
+    def fourier_filter_function(self, omega:float, beta:float, delta:float, h:float, NT:int):
+        """ return the Fourier transformed filter function -- need to check quasienergy conventions! """
+        flist = self.filter_function(beta, delta, h, NT)
+        MT = len(flist)//2
+        tlist = np.arange(-MT, MT+1)
+        return np.sum([flist[t]*np.exp(1j*(h-omega)*tlist[t]) for t in range(len(tlist))])
+            
+
     # ── Circuit building helpers ──────────────────────────────────────────────
 
     def _get_bath_layer(self, h:float):
@@ -102,19 +111,27 @@ class DetailedBalanceProtocol(Protocol):
 
         aPauli: dict {bath_idx: (az, ay)} — keyed by bath qubit index.
                 System qubit retrieved from coupling_geometry.
-                Values are floats or sympy symbols. Use PAULI_ALPHAS for standard choices.
+                Values are floats or sympy symbols. Use pauli_angles for standard choices.
 
         Returns (pre_ops, post_ops). Ops grouped by gate type so each sub-list
         acts on distinct qubits → cirq packs each into one moment.
         """
+        def _nonzero(val):
+            try:
+                return not np.isclose(val, 0)
+            except TypeError:
+                return True  # sympy symbol — can't tell, include it
+
         S = self.device.system_qubits
         pre_rz, pre_ry, post_ry, post_rz = [], [], [], []
         for bi, si in coupling_geometry.items():
             az, ay = aPauli[bi]
-            pre_rz.append(cirq.rz(-az)(S[si]))   # U†: Rz(-az)
-            post_rz.append(cirq.rz(az)(S[si]))   # U:  Rz(az)
-            pre_ry.append(cirq.ry(-ay)(S[si]))   # U†: Ry(-ay)
-            post_ry.append(cirq.ry(ay)(S[si]))   # U:  Ry(ay)
+            if _nonzero(az):
+                pre_rz.append(cirq.rz(-az)(S[si]))
+                post_rz.append(cirq.rz(az)(S[si]))
+            if _nonzero(ay):
+                pre_ry.append(cirq.ry(-ay)(S[si]))
+                post_ry.append(cirq.ry(ay)(S[si]))
         pre  = pre_rz  + pre_ry    # Rz(-az) then Ry(-ay) — distinct qubits, one moment each
         post = post_ry + post_rz   # Ry(ay)  then Rz(az)
         return pre, post
@@ -159,22 +176,24 @@ class DetailedBalanceProtocol(Protocol):
 
     def channel(self, coupling_geometry:dict, params:dict) -> cirq.FrozenCircuit:
         """
-        Build one cooling cycle.
+        DetailedBalanceProtocol channel.
 
+        Requires:
         coupling_geometry   : dict {bath_idx: sys_idx}, system bath coupling geometry
-
-        Required params (S = structural, sets circuit depth and must be real parameter):
-            beta            : float (S) - inverse target temperature
-            delta           : float (S) - trotter angle
-            h               : float (S) - bath splitting
-            theta           : float or sympy  — coupling strength
-
-        Optional params:
-            NT              : int (S, default 5) — filter truncation / circuit depth parameter
-            aPauli          : dict {bath_idx: (az, ay)}, optional, float or sympy, defaults to XX coupling
+        params              : dict {param_name: value}, channel parameters
+            Required params (S = structural, sets circuit depth and must be real parameter):
+                beta            : float (S) - inverse target temperature
+                delta           : float (S) - trotter angle
+                h               : float (S) - bath splitting
+                theta           : float or sympy  — coupling strength
+            Optional params:
+                NT              : int (S, default 5) — filter truncation / circuit depth parameter
+                aPauli          : dict {bath_idx: (az, ay)}, optional, float or sympy, defaults to XX coupling
 
         Returns a FrozenCircuit. If theta or aPauli carry sympy symbols the
         circuit is parameterised and resolved before simulation (allows Scheduling).
+        
+        Use Protocol.draw_channel(coupling_geometry, params) to see channel circuit.
         """
         self.validate_geometry(coupling_geometry)
 
@@ -190,7 +209,7 @@ class DetailedBalanceProtocol(Protocol):
 
         # non-structural params — may be sympy symbols
         theta  = self.allow_symbolic(params, "theta")
-        default_aPauli = {bi: PAULI_ALPHAS['X'] for bi in coupling_geometry.keys()} # default to XX coupling
+        default_aPauli = {bi: self.pauli_angles['X'] for bi in coupling_geometry.keys()} # default to XX coupling
         aPauli = self.allow_symbolic(params, "aPauli", default=default_aPauli)
 
         # compute filter and derived structure

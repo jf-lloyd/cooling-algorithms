@@ -55,9 +55,24 @@ class Protocol(ABC):
     @abstractmethod
     def channel(self, coupling_geometry: dict, params: dict) -> cirq.FrozenCircuit:
         """
-        Build and return one cooling-cycle. 
+        Build and return one cooling-cycle.
         """
         pass
+
+    @property
+    def print_channel_description(self):
+        """Print the channel description (inc parameters required by channel) for this protocol."""
+        print(self.channel.__doc__)
+
+    def draw_channel(self, coupling_geometry: dict, params: dict):
+        """Draw the cooling channel circuit."""
+        C = cirq.Circuit(self.channel(coupling_geometry, params))
+        print(f"Circuit: {len(C) - 1} moments + reset")
+        try:
+            from IPython.display import display
+            display(C)
+        except ImportError:
+            print(C)
 
 
     # ______ helpers for getting parameter values _____ 
