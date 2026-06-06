@@ -125,8 +125,9 @@ class TriangularLattice2D(Lattice):
                 else:
                     B_odd.append(bond)
 
-        # Direction C: (x, y) -> (x+1, y-1)
-        C_even, C_odd = [], []
+        # Direction C: (x, y) -> (x+1, y-1).  Odd periodic x-rings need a
+        # separate seam layer, just like the horizontal/vertical directions.
+        C_even, C_odd, C_seam = [], [], []
         for x in range(Lx):
             for y in range(Ly):
                 if not self.pbc_x and x + 1 >= Lx:
@@ -136,10 +137,12 @@ class TriangularLattice2D(Lattice):
                 s = self.index(x, y)
                 t = self.index((x + 1) % Lx, (y - 1) % Ly)
                 bond = (min(s, t), max(s, t))
-                if x % 2 == 0:
+                if self.pbc_x and Lx % 2 == 1 and x == Lx - 1:
+                    C_seam.append(bond)
+                elif x % 2 == 0:
                     C_even.append(bond)
                 else:
                     C_odd.append(bond)
 
-        layers = [A_even, A_odd, A_seam, B_even, B_odd, B_seam, C_even, C_odd]
+        layers = [A_even, A_odd, A_seam, B_even, B_odd, B_seam, C_even, C_odd, C_seam]
         return [layer for layer in layers if layer]
