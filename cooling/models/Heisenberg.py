@@ -30,8 +30,6 @@ class HeisenbergModel(Model):
         return f"HeisenbergModel_{self.lattice.name}_Jxx{self.Jxx:.3f}_Jyy{self.Jyy:.3f}_Jzz{self.Jzz:.3f}"
 
     def build_coupling_lists(self):
-        """ couplings of Hamiltonian. Note that the build order of couplings controls the order gates are run
-        (if base build_system_layer is not overwritten) -- so here we apply XX gates, then YY, then ZZ """
         pairs = self._lattice.nearest_neighbour_pairs()
         couplings = {}
         if self.Jxx != 0.: couplings['XX'] = [(self.Jxx, s, t) for s, t in pairs]

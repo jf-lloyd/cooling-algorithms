@@ -17,6 +17,8 @@ build-backend = "setuptools.build_meta"
 packages = [
     "cooling",
     "cooling.lattices",
+    "cooling.measurements",
     "cooling.models",
     "cooling.protocols",
+    "cooling.schedules",
 ]
