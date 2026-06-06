@@ -9,6 +9,7 @@ Created by Jerome Lloyd on 4th June 2026.
 from abc import ABC, abstractmethod
 import cirq
 import numbers
+from ..gates import YXPowGate, ZXPowGate
 
 class Protocol(ABC):
     """
@@ -20,6 +21,10 @@ class Protocol(ABC):
     model  : Model
     gamma  : float - depolarising noise strength. 0 = off (default).
     """
+
+    ## override in subclass if needed
+    _COUPLING_GATE_MAP = {'X': cirq.XXPowGate,'Y': YXPowGate,'Z': ZXPowGate, 'iSWAP':  cirq.ISwapPowGate}
+
 
     def __init__(self, device:"CoolingDevice", model:"Model", gamma:float=0.):
         self.device = device
@@ -51,12 +56,20 @@ class Protocol(ABC):
     def reset_layer(self):
         return self._reset_layer
 
-    @abstractmethod
+    @property
+    def allowed_coupling_gates(self) -> dict:
+        return self._COUPLING_GATE_MAP
+    
     def coupling_gates(self, coupling_ops: dict) -> dict:
         """
-        Defines the allowed system-bath gates of the protocol. 
-        Passed a dict {bath_idx : op_str} and returns a dict {bath_idx : op}
+        Return {bath_idx: gate} for the given {bath_idx: op_str} dict.
+        Valid op strings: 'X', 'Y', 'Z', 'iSWAP'.
+        Override in subclass if needed.
         """
+        invalid = set(coupling_ops.values()) - self._COUPLING_GATE_MAP.keys()
+        if invalid:
+            raise ValueError(f"Unknown coupling ops {invalid}. Choose from {list(self._COUPLING_GATE_MAP)}.")
+        return {bi: self._COUPLING_GATE_MAP[op] for bi, op in coupling_ops.items()}
 
     def validate_geometry(self, coupling_geometry: dict, coupling_ops: dict):
         """

@@ -6,8 +6,6 @@ Created by Jerome Lloyd on 4th June 2026.
 import numpy as np
 import cirq
 from .protocolbase import Protocol
-from ..gates import YXPowGate, ZXPowGate
-
 
 class DetailedBalanceProtocol(Protocol):
 
@@ -19,8 +17,6 @@ class DetailedBalanceProtocol(Protocol):
 
     Supported system-bath coupling gates: 'XX', 'YX', 'ZX', 'iSWAP'.
     """
-
-    _COUPLING_GATE_MAP = {'X': cirq.XXPowGate,'Y': YXPowGate,'Z': ZXPowGate, 'iSWAP':  cirq.ISwapPowGate}
 
     def __init__(self, device:"CoolingDevice", model:"Model", gamma:float=0., function="gaussian"):
 
@@ -45,19 +41,6 @@ class DetailedBalanceProtocol(Protocol):
         """Print the channel description (inc parameters required by channel) for this protocol."""
         print(f"Using filter function: {self.function}")
         print(self.channel.__doc__)
-
-    def allowed_coupling_gates(self):
-        print(self._COUPLING_GATE_MAP)
-    
-    def coupling_gates(self, coupling_ops: dict) -> dict:
-        """
-        Return {bath_idx: gate} for the given {bath_idx: op_str} dict.
-        Valid op strings: 'X', 'Y', 'Z', 'iSWAP'.
-        """
-        invalid = set(coupling_ops.values()) - self._COUPLING_GATE_MAP.keys()
-        if invalid:
-            raise ValueError(f"Unknown coupling ops {invalid}. Choose from {list(self._COUPLING_GATE_MAP)}.")
-        return {bi: self._COUPLING_GATE_MAP[op] for bi, op in coupling_ops.items()}
 
     # ── Filter functions ──────────────────────────────────────────────────────
 
