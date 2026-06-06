@@ -83,8 +83,8 @@ class Simulation:
         os.makedirs(path, exist_ok=True)
         record.to_pickle(os.path.join(path, fname + ".pkl"))
 
-    def run(self, circuit_fn, R: int, K: int = 1, measurement=None, seed=None,
-            circuit_memoization_size=None, measure_every: int = 1) -> pd.DataFrame:
+    def run(self, circuit_fn, R: int, K: int = 1, measurement=None, measure_every: int = 1, seed=None,
+            circuit_memoization_size=None) -> pd.DataFrame:
         """
         Run K independent trajectories of R cooling steps each.
 
@@ -92,10 +92,10 @@ class Simulation:
         R            : number of cooling steps per trajectory
         K            : number of independent trajectories
         measurement  : Measurement; defaults to DefaultMeasurement1
+        measure_every : measure observables every this many steps (default 1).
         seed         : RNG seed
         circuit_memoization_size : override qsim memoization. If None and a
                        Schedule is passed, defaults to the schedule cache size.
-        measure_every : measure observables every this many steps (default 1).
 
         Returns a DataFrame with columns {repeat, t, ...observables}.
         """
@@ -103,7 +103,22 @@ class Simulation:
         if measurement is None:
             measurement = DefaultMeasurement1(self.device, self.model)
         circuit_fn = self._wrap(circuit_fn)
-        rng  = np.random.default_rng(seed)
+
+        # Derive three independent sub-seeds so all randomness is reproducible.
+        # SeedSequence(None) gives a fresh random seed when seed=None.
+        ss = np.random.SeedSequence(seed)
+        rng_seed, qsim_seed, schedule_seed = ss.spawn(3)
+        rng = np.random.default_rng(rng_seed)
+        # Rebuild simulator with a fixed qsim seed (controls trajectory collapses).
+        self.simulator = qsim.QSimSimulator(
+            self.options, circuit_memoization_size=self.memoization,
+            seed=int(np.random.default_rng(qsim_seed).integers(2**31))
+        )
+        # Reseed the schedule's circuit-selection RNG so repeated run() calls
+        # with the same seed draw the same sequence of circuits from the cache.
+        if schedule is not None:
+            schedule._rng = np.random.default_rng(schedule_seed)
+
         rows = []
 
         for k in (range(K)):
