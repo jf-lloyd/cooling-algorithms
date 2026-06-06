@@ -32,10 +32,11 @@ class Simulation:
         self.qubit_order = self.device.qubits
 
         options = {'max_fused_gate_size': 5, 'use_gpu': False, 't': 8}
+        self.set_memoization_size()
+
+    def set_memoization_size(self, size:int=2):
         ## memoization sets how many circuits qsim stores in memory
-        ## for single repeated circuit we want circuit_memoization_size=1
-        ## for K repeated circuits we may want circuit_memoization_size=K
-        self.simulator = qsim.QSimSimulator(options, circuit_memoization_size=2)
+        self.simulator = qsim.QSimSimulator(options, circuit_memoization_size=size)
 
     # ── State helpers ─────────────────────────────────────────────────────────
 
