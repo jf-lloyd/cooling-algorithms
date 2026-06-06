@@ -9,3 +9,8 @@
 - Complete example notebook
 - Cluster setup for `run_parallel` (SLURM array job pattern)
 - Profiling scripts: clean up and document in `claudespace/`
+- Gate-based noise model
+- Short depth initial state preparation
+- GPU measurement: use qsim `simulate_expectation_values()` at measurement steps
+  instead of extracting state vector + cirq PauliSum on CPU. Needs `measure_from_circuit(circuit, state)`
+  interface on Measurement. Required before GPU cluster runs are measurement-bound (crossover ~5×4+).
