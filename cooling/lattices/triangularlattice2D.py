@@ -87,6 +87,32 @@ class TriangularLattice2D(Lattice):
                 add(self.index(x, self._Ly - 1))
         return bry
 
+    def stub_endpoints(self, s: int, t: int, stub_length: float) -> tuple:
+        """
+        Override for triangular draw_coords (draw_x = lattice_x + 0.5*lattice_y).
+        Uses minimum-image lattice displacement so stubs point in the true bond
+        direction regardless of the coordinate offset.
+        """
+        xs, ys = self.coords(s)
+        xt, yt = self.coords(t)
+        dx = xt - xs
+        dy = yt - ys
+        # Minimum image in each periodic direction
+        if self.pbc_x and abs(dx) > self._Lx // 2:
+            dx -= int(np.sign(dx)) * self._Lx
+        if self.pbc_y and abs(dy) > self._Ly // 2:
+            dy -= int(np.sign(dy)) * self._Ly
+        # Map lattice step to draw_coords displacement
+        draw_dx = dx + 0.5 * dy
+        draw_dy = dy * np.sqrt(3) / 2
+        norm = np.sqrt(draw_dx ** 2 + draw_dy ** 2)
+        ux, uy = draw_dx / norm, draw_dy / norm
+        cs = self.draw_coords(s)
+        ct = self.draw_coords(t)
+        gs = (cs[0] + stub_length * ux, cs[1] + stub_length * uy)
+        gt = (ct[0] - stub_length * ux, ct[1] - stub_length * uy)
+        return gs, gt
+
     def bond_colouring(self):
         """
         3-direction even/odd colouring: horizontal (A), vertical (B), diagonal (C).

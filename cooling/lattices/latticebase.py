@@ -48,6 +48,31 @@ class Lattice(ABC):
         Override for non-rectangular geometries (e.g. triangular lattice)."""
         return self.coords(s)
 
+    def stub_endpoints(self, s: int, t: int, stub_length: float) -> tuple:
+        """
+        For a wrap (PBC) bond (s, t), return stub endpoint positions (gs, gt)
+        for visualisation. Stubs point outward from each node in the direction
+        the bond exits the unit cell.
+
+        The base implementation works for lattices where draw_coords equals
+        lattice coords (rectangular geometries). Override for lattices with
+        coordinate offsets (e.g. triangular).
+        """
+        raw_s = self.draw_coords(s)
+        raw_t = self.draw_coords(t)
+        # Pad to 2D so callers can always index [0] and [1].
+        cs = (raw_s[0], raw_s[1] if len(raw_s) > 1 else 0)
+        ct = (raw_t[0], raw_t[1] if len(raw_t) > 1 else 0)
+        gs = list(cs)
+        gt = list(ct)
+        for d in range(2):
+            diff = ct[d] - cs[d]
+            if abs(diff) > 1:
+                sign = 1 if diff > 0 else -1
+                gs[d] = cs[d] - sign * stub_length
+                gt[d] = ct[d] + sign * stub_length
+        return tuple(gs), tuple(gt)
+
     def nearest_neighbour_pairs(self):
         """Return undirected neighbour pairs (s, t) with s < t."""
         pairs = []

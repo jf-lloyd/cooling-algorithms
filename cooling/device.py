@@ -167,18 +167,6 @@ class CoolingDevice():
         # --- bonds per colouring layer ---
         palette = plt.colormaps["tab10"]
         
-        def stub_ghosts(s, t):
-            """Return (ghost_s_pos, ghost_t_pos) for a wrap bond, in draw_coords space."""
-            cs = list(self._lattice.draw_coords(s))
-            ct = list(self._lattice.draw_coords(t))
-            gs, gt = list(cs), list(ct)
-            for d in range(len(cs)):
-                diff = ct[d] - cs[d]
-                if abs(diff) > 1:
-                    gs[d] = cs[d] - stub_length if diff > 0 else cs[d] + stub_length
-                    gt[d] = ct[d] + stub_length if diff > 0 else ct[d] - stub_length
-            return tuple(gs), tuple(gt)
-
         bond_layers = self._lattice.bond_colouring()
         for li, layer in enumerate(bond_layers):
             c = palette(li % 10)
@@ -186,13 +174,13 @@ class CoolingDevice():
             for (s, t) in layer:
                 qs, qt = self._system_qubits[s], self._system_qubits[t]
                 wrap = self._lattice.is_wrap_bond(s, t)
-        
+
                 if wrap:
                     # draw two short dashed stubs instead of a long wrap edge
-                    gs, gt = stub_ghosts(s, t)
-                    ax.plot([pos[qs][0], gs[0]], [pos[qs][1], gs[1] if len(gs) > 1 else 0],
+                    gs, gt = self._lattice.stub_endpoints(s, t, stub_length)
+                    ax.plot([pos[qs][0], gs[0]], [pos[qs][1], gs[1]],
                             color=c, linewidth=2, linestyle="-.", alpha=1)
-                    ax.plot([pos[qt][0], gt[0]], [pos[qt][1], gt[1] if len(gt) > 1 else 0],
+                    ax.plot([pos[qt][0], gt[0]], [pos[qt][1], gt[1]],
                             color=c, linewidth=2, linestyle="-.", alpha=1)
                 else:
                     regular.append((qs, qt))
