@@ -148,6 +148,18 @@ class Model(ABC):
         H0 = sum(components.values(), cirq.PauliSum())
         return H0, components
 
+    def __getstate__(self):
+        # cirq.PauliSum contains a LinearDict with an unpicklable local lambda.
+        # Exclude hamiltonian; rebuild it on unpickling from coupling_lists.
+        state = self.__dict__.copy()
+        del state['hamiltonian']
+        del state['hamiltonian_components']
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.hamiltonian, self.hamiltonian_components = self.build_hamiltonian()
+
     def draw_model(self):
         C = cirq.Circuit(self.system_layer)
         print(C)

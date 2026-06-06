@@ -14,20 +14,16 @@ from tqdm import tqdm
 
 from .measurements import DefaultMeasurement1
 
-# ── Parallel worker (module-level so it's picklable) ─────────────────────────
-# State is set in run_parallel() before forking; workers inherit via fork.
-# Not thread-safe: concurrent run_parallel() calls from different threads would corrupt this dict.
-_pworker: dict = {}
+# ── Parallel worker (module-level so it's picklable by spawn) ────────────────
 
 def _parallel_worker(args):
-    k_worker, seed = args
-    sim = Simulation(_pworker['protocol'])
+    protocol, circuit_fn, R, k_worker, measure_every, seed, circuit_memoization_size = args
+    sim = Simulation(protocol)
     return sim.run(
-        _pworker['circuit_fn'], _pworker['R'], k_worker,
-        measurement=_pworker['measurement'],
-        measure_every=_pworker['measure_every'],
+        circuit_fn, R, k_worker,
+        measure_every=measure_every,
         seed=seed,
-        circuit_memoization_size=_pworker['circuit_memoization_size'],
+        circuit_memoization_size=circuit_memoization_size,
     )
 
 
@@ -157,21 +153,16 @@ class Simulation:
                      measurement=None, measure_every: int = 1, seed=None,
                      circuit_memoization_size=None) -> pd.DataFrame:
         """
-        Run K trajectories split across n_workers processes (fork-based).
+        Run K trajectories split across n_workers processes.
 
-        Same API as run(). Uses fork so the protocol and schedule are inherited
-        without pickling. n_workers defaults to min(K, cpu_count).
-
-        Note: not supported on Windows (no fork).
+        Same API as run(). n_workers defaults to min(K, cpu_count).
         """
+        if measurement is not None:
+            raise NotImplementedError("Custom measurements are not supported in run_parallel; use run() instead.")
         if n_workers is None:
             n_workers = min(K, _mp.cpu_count())
         n_workers = min(n_workers, K)
 
-        if measurement is None:
-            measurement = DefaultMeasurement1(self.device, self.model)
-
-        # Derive per-worker seeds from main seed before forking.
         ss = np.random.SeedSequence(seed)
         worker_seeds = [int(np.random.default_rng(s).integers(2**31))
                         for s in ss.spawn(n_workers)]
@@ -179,19 +170,14 @@ class Simulation:
         base, rem = divmod(K, n_workers)
         k_splits = [base + (1 if i < rem else 0) for i in range(n_workers)]
 
-        global _pworker
-        _pworker.update({
-            'protocol':              self.protocol,
-            'circuit_fn':            circuit_fn,
-            'R':                     R,
-            'measurement':           measurement,
-            'measure_every':         measure_every,
-            'circuit_memoization_size': circuit_memoization_size,
-        })
+        worker_args = [
+            (self.protocol, circuit_fn, R, k, measure_every, ws, circuit_memoization_size)
+            for k, ws in zip(k_splits, worker_seeds)
+        ]
 
-        ctx = _mp.get_context('fork')
+        ctx = _mp.get_context('spawn')
         with ctx.Pool(n_workers) as pool:
-            dfs = pool.map(_parallel_worker, list(zip(k_splits, worker_seeds)))
+            dfs = pool.map(_parallel_worker, worker_args)
 
         # Reassign repeat indices to be globally unique across workers.
         offset, out = 0, []

@@ -4,12 +4,17 @@ import numpy as np
 import cirq
 from .schedulebase import Schedule
 
+def _false():
+    return False
+
 
 class Randomized(Schedule):
     """
     Each channel application uses a new random system-bath geometry and randomly selects
     cooling operators from the allowed protocol set. Other protocol parameters are fixed,
     provided by params. The randomization provides ergodic dynamics in practice.
+    Bath qubits are treated as indistinguishable for random geometry selection, so
+    random geometries are sampled as combinations of system sites.
 
     In practice, drawing a new circuit every step slows down simulation;
     we therefore build a fixed cache of random circuits at the start of the simulation,
@@ -34,7 +39,8 @@ class Randomized(Schedule):
                  resample_trajectories: bool = False,
                  parameterized: bool = False, seed=None):
 
-        super().__init__(protocol, params)
+        super().__init__(protocol)
+        self.params           = params
         self.coupling_geometry = coupling_geometry
         self.coupling_ops     = coupling_ops
         self.n_cache          = n_cache
@@ -133,7 +139,7 @@ class Randomized(Schedule):
             # Circuits are concrete (no sympy): tell cirq/qsim so they skip the
             # parameterization scan and don't copy the circuit on resolve.
             for fc in self._cache:
-                fc._is_parameterized_ = lambda: False
+                fc._is_parameterized_ = _false
 
     @property
     def sim_options(self) -> dict:
