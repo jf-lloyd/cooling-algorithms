@@ -149,5 +149,5 @@ class Model(ABC):
         return H0, components
 
     def draw_model(self):
-        C = cirq.Circuit(gate for gate in self.system_layer)
+        C = cirq.Circuit(self.system_layer)
         print(C)

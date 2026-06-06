@@ -26,10 +26,7 @@ class Randomized(Schedule):
     n_cache           : number of circuits to pre-build.
     seed              : RNG seed for reproducibility
     resample          : refresh the cache every resample steps (t=resample, 2*resample, ...); no refresh if None
-    parameterized     : if False (default), mark cached circuits as not parameterized
-                        (_is_parameterized_ -> False) so qsim/cirq skip the sympy
-                        scan and avoid copying the circuit (preserves memoization).
-                        The protocol builds concrete circuits, so this is safe.
+    parameterized     : if False (default), mark cached circuits as not parameterized so qsim skip the sympy scan.
     """
 
     def __init__(self, protocol, params: dict, coupling_geometry=None, coupling_ops=None,
@@ -38,7 +35,6 @@ class Randomized(Schedule):
                  parameterized: bool = False, seed=None):
 
         super().__init__(protocol, params)
-        self.params           = params
         self.coupling_geometry = coupling_geometry
         self.coupling_ops     = coupling_ops
         self.n_cache          = n_cache

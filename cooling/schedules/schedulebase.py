@@ -27,6 +27,7 @@ class Schedule(ABC):
 
     def __init__(self, protocol, params: dict):
         self.protocol = protocol
+        self.params   = params
         self._cache   = []
 
     @property

@@ -7,10 +7,8 @@ Created by Jerome Lloyd on 5th June 2026.
 import numpy as np
 import cirq
 
-"""
-YXPowGate and ZXPowGate follow the same exponent convention as cirq.XXPowGate:
-gate(exponent=e) implements exp(-i·π/2·e·P⊗X), gate**t scales the exponent by t
-"""
+# YXPowGate and ZXPowGate follow the same exponent convention as cirq.XXPowGate:
+# gate(exponent=e) implements exp(-i·π/2·e·P⊗X), gate**t scales the exponent by t
 
 class YXPowGate(cirq.EigenGate):
     """

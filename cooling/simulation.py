@@ -5,6 +5,7 @@ Created by Jerome Lloyd on 5th June 2026.
 """
 
 import os
+import multiprocessing as _mp
 import numpy as np
 import pandas as pd
 import cirq
@@ -12,6 +13,22 @@ import qsimcirq as qsim
 from tqdm import tqdm
 
 from .measurements import DefaultMeasurement1
+
+# ── Parallel worker (module-level so it's picklable) ─────────────────────────
+# State is set in run_parallel() before forking; workers inherit via fork.
+# Not thread-safe: concurrent run_parallel() calls from different threads would corrupt this dict.
+_pworker: dict = {}
+
+def _parallel_worker(args):
+    k_worker, seed = args
+    sim = Simulation(_pworker['protocol'])
+    return sim.run(
+        _pworker['circuit_fn'], _pworker['R'], k_worker,
+        measurement=_pworker['measurement'],
+        measure_every=_pworker['measure_every'],
+        seed=seed,
+        circuit_memoization_size=_pworker['circuit_memoization_size'],
+    )
 
 
 class Simulation:
@@ -121,7 +138,7 @@ class Simulation:
 
         rows = []
 
-        for k in (range(K)):
+        for k in range(K):
             if schedule is not None and schedule.sim_options.get('resample_trajectories'):
                 schedule.build_cache(_warn=False)
             state = self._initial_state(rng)
@@ -136,64 +153,55 @@ class Simulation:
 
         return pd.DataFrame(rows)
 
-    def expectation_values(self, circuit_fn, R: int, K: int = 1, measurement=None, seed=None,
-                           circuit_memoization_size=None) -> pd.DataFrame:
+    def run_parallel(self, circuit_fn, R: int, K: int, n_workers: int = None,
+                     measurement=None, measure_every: int = 1, seed=None,
+                     circuit_memoization_size=None) -> pd.DataFrame:
         """
-        Run K trajectories of R cooling steps, using a concatenated circuit.
+        Run K trajectories split across n_workers processes (fork-based).
 
-        Concatenates the R channel applications into one big circuit and uses
-        simulate_moment_steps once per trajectory, reducing translation overhead.
-        Measures at every Nth moment (end of each channel, after the reset layer).
+        Same API as run(). Uses fork so the protocol and schedule are inherited
+        without pickling. n_workers defaults to min(K, cpu_count).
 
-        circuit_fn  : Schedule, FrozenCircuit, or callable int → FrozenCircuit.
-                      Note: resample_trajectories is not supported here.
-        R           : number of cooling steps per trajectory
-        K           : number of independent trajectories
-        measurement : Measurement; defaults to DefaultMeasurement1
-        seed        : RNG seed
-        circuit_memoization_size : override qsim memoization. If None and a
-                      Schedule is passed, defaults to the schedule cache size.
-
-        Returns a DataFrame with columns {repeat, t, ...observables}.
+        Note: not supported on Windows (no fork).
         """
-        schedule, circuit_fn = self._unwrap_schedule(circuit_fn, circuit_memoization_size)
-        if schedule is not None and schedule.sim_options.get('resample_trajectories'):
-            raise ValueError("resample_trajectories is not supported in expectation_values. Use run() instead.")
+        if n_workers is None:
+            n_workers = min(K, _mp.cpu_count())
+        n_workers = min(n_workers, K)
+
         if measurement is None:
             measurement = DefaultMeasurement1(self.device, self.model)
-        circuit_fn = self._wrap(circuit_fn)
 
-        # Build concatenated circuit once — reused for all K trajectories
-        big_circuit = cirq.Circuit()
-        for t in range(1, R + 1):
-            big_circuit += cirq.Circuit(circuit_fn(t))
-        N = len(big_circuit) // R
-        # short-circuit cirq's per-op parameterisation scan — our circuit is
-        # always concrete (no sympy symbols), so resolve_parameters returns early
-        big_circuit._is_parameterized_ = lambda: False
+        # Derive per-worker seeds from main seed before forking.
+        ss = np.random.SeedSequence(seed)
+        worker_seeds = [int(np.random.default_rng(s).integers(2**31))
+                        for s in ss.spawn(n_workers)]
 
-        # Observables at each channel boundary moment (last moment of each channel)
-        obs_list  = [op for op, _ in measurement._measures.values()]
-        obs_names = list(measurement._measures.keys())
-        indexed_obs = {k * N - 1: obs_list for k in range(1, R + 1)}
+        base, rem = divmod(K, n_workers)
+        k_splits = [base + (1 if i < rem else 0) for i in range(n_workers)]
 
-        rng  = np.random.default_rng(seed)
-        rows = []
+        global _pworker
+        _pworker.update({
+            'protocol':              self.protocol,
+            'circuit_fn':            circuit_fn,
+            'R':                     R,
+            'measurement':           measurement,
+            'measure_every':         measure_every,
+            'circuit_memoization_size': circuit_memoization_size,
+        })
 
-        for k in tqdm(range(K)):
-            state = self._initial_state(rng)
-            rows.append({"repeat": k, "t": 0,
-                         **measurement.measure_from_state_vector(self.get_system_state(state))})
+        ctx = _mp.get_context('fork')
+        with ctx.Pool(n_workers) as pool:
+            dfs = pool.map(_parallel_worker, list(zip(k_splits, worker_seeds)))
 
-            results = self.simulator.simulate_moment_expectation_values(
-                big_circuit, indexed_obs, cirq.ParamResolver(),
-                qubit_order=self.qubit_order, initial_state=state,
-            )
-            for step_idx, obs_values in enumerate(results):
-                rows.append({"repeat": k, "t": step_idx + 1,
-                             **dict(zip(obs_names, obs_values))})
+        # Reassign repeat indices to be globally unique across workers.
+        offset, out = 0, []
+        for df in dfs:
+            df = df.copy()
+            df['repeat'] += offset
+            offset += int(df['repeat'].max()) + 1
+            out.append(df)
 
-        return pd.DataFrame(rows)
+        return pd.concat(out, ignore_index=True)
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 

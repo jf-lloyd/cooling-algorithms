@@ -30,8 +30,6 @@ class DetailedBalanceProtocol(Protocol):
         else:
             raise ValueError(f"Unknown filter function {function!r}. Choose 'gaussian' or 'mcp'.")
 
-        self._system_layer = self.model.system_layer
-
     @property
     def name(self):
         return 'no_name'
@@ -118,14 +116,10 @@ class DetailedBalanceProtocol(Protocol):
         NT    = self.require_int(params,  "NT", default=5)
         theta = self.get_param(params, "theta")
 
-        if self.function == "mcp" and not np.isclose(h, np.pi / 2):
-            print(f"mcp requires h=π/2; overriding supplied h={h:.4f}")
-            h = np.pi / 2
-
         filter_f = self.filter_function(beta, delta, h, NT)
         MT       = len(filter_f) // 2
 
-        sys_ops  = [u**delta for u in self._system_layer]
+        sys_ops  = [u**delta for u in self.model.system_layer]
         if self.function == "mcp":
             bath_ops = list(self._get_bath_layer(h))
         else:
