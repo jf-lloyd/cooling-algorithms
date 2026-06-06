@@ -84,17 +84,18 @@ class Simulation:
         record.to_pickle(os.path.join(path, fname + ".pkl"))
 
     def run(self, circuit_fn, R: int, K: int = 1, measurement=None, seed=None,
-            circuit_memoization_size=None) -> pd.DataFrame:
+            circuit_memoization_size=None, measure_every: int = 1) -> pd.DataFrame:
         """
         Run K independent trajectories of R cooling steps each.
 
-        circuit_fn  : Schedule, FrozenCircuit, or callable int → FrozenCircuit.
-        R           : number of cooling steps per trajectory
-        K           : number of independent trajectories
-        measurement : Measurement; defaults to DefaultMeasurement1
-        seed        : RNG seed
+        circuit_fn   : Schedule, FrozenCircuit, or callable int → FrozenCircuit.
+        R            : number of cooling steps per trajectory
+        K            : number of independent trajectories
+        measurement  : Measurement; defaults to DefaultMeasurement1
+        seed         : RNG seed
         circuit_memoization_size : override qsim memoization. If None and a
-                      Schedule is passed, defaults to the schedule cache size.
+                       Schedule is passed, defaults to the schedule cache size.
+        measure_every : measure observables every this many steps (default 1).
 
         Returns a DataFrame with columns {repeat, t, ...observables}.
         """
@@ -105,7 +106,7 @@ class Simulation:
         rng  = np.random.default_rng(seed)
         rows = []
 
-        for k in tqdm(range(K)):
+        for k in (range(K)):
             if schedule is not None and schedule.sim_options.get('resample_trajectories'):
                 schedule.build_cache(_warn=False)
             state = self._initial_state(rng)
@@ -114,8 +115,9 @@ class Simulation:
 
             for t in range(1, R + 1):
                 state = self._step(circuit_fn(t), state)
-                rows.append({"repeat": k, "t": t,
-                             **measurement.measure_from_state_vector(self.get_system_state(state))})
+                if t % measure_every == 0:
+                    rows.append({"repeat": k, "t": t,
+                                 **measurement.measure_from_state_vector(self.get_system_state(state))})
 
         return pd.DataFrame(rows)
 
