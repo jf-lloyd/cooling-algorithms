@@ -26,8 +26,18 @@ class Schedule(ABC):
     """
 
     def __init__(self, protocol, params: dict):
-        self.protocol  = protocol
-        self._cache = []
+        self.protocol = protocol
+        self._cache   = []
+        # Optional override for qsim circuit_memoization_size. If None, the
+        # Simulation defaults to cache_size (one slot per distinct circuit).
+        self._memoization_override = None
+
+    @property
+    def sim_options(self) -> dict:
+        memo = self._memoization_override if self._memoization_override is not None else self.cache_size
+        return {'n_cache': self.cache_size,
+                'circuit_memoization_size': memo,
+                'resample_trajectories': False}
 
     @abstractmethod
     def circuit_fn(self, t: int) -> cirq.FrozenCircuit:

@@ -31,12 +31,14 @@ class Simulation:
         # System qubits first: get_system_state reshape assumes this layout.
         self.qubit_order = self.device.qubits
 
-        options = {'max_fused_gate_size': 5, 'use_gpu': False, 't': 8}
+        self.options = {'max_fused_gate_size': 4, 'use_gpu': False, 't': 2}
+        self.memoization = 1
         self.set_memoization_size()
 
     def set_memoization_size(self, size:int=2):
         ## memoization sets how many circuits qsim stores in memory
-        self.simulator = qsim.QSimSimulator(options, circuit_memoization_size=size)
+        self.memoization = size
+        self.simulator = qsim.QSimSimulator(self.options, circuit_memoization_size=size)
 
     # ── State helpers ─────────────────────────────────────────────────────────
 
@@ -73,7 +75,8 @@ class Simulation:
         """
         Run K independent trajectories of R cooling steps each.
 
-        circuit_fn  : FrozenCircuit or callable int → FrozenCircuit
+        circuit_fn  : Schedule, FrozenCircuit, or callable int → FrozenCircuit.
+                      If a Schedule, memoization is set automatically from sim_options.
         R           : number of cooling steps per trajectory
         K           : number of independent trajectories
         measurement : Measurement; defaults to DefaultMeasurement1
@@ -81,6 +84,7 @@ class Simulation:
 
         Returns a DataFrame with columns {repeat, t, ...observables}.
         """
+        schedule, circuit_fn = self._unwrap_schedule(circuit_fn)
         if measurement is None:
             measurement = DefaultMeasurement1(self.device, self.model)
         circuit_fn = self._wrap(circuit_fn)
@@ -88,6 +92,8 @@ class Simulation:
         rows = []
 
         for k in tqdm(range(K)):
+            if schedule is not None and schedule.sim_options.get('resample_trajectories'):
+                schedule.build_cache(_warn=False)
             state = self._initial_state(rng)
             rows.append({"repeat": k, "t": 0,
                          **measurement.measure_from_state_vector(self.get_system_state(state))})
@@ -107,7 +113,9 @@ class Simulation:
         simulate_moment_steps once per trajectory, reducing translation overhead.
         Measures at every Nth moment (end of each channel, after the reset layer).
 
-        circuit_fn  : FrozenCircuit or callable int → FrozenCircuit
+        circuit_fn  : Schedule, FrozenCircuit, or callable int → FrozenCircuit.
+                      If a Schedule, memoization is set automatically from sim_options.
+                      Note: resample_trajectories is not supported here.
         R           : number of cooling steps per trajectory
         K           : number of independent trajectories
         measurement : Measurement; defaults to DefaultMeasurement1
@@ -115,6 +123,9 @@ class Simulation:
 
         Returns a DataFrame with columns {repeat, t, ...observables}.
         """
+        schedule, circuit_fn = self._unwrap_schedule(circuit_fn)
+        if schedule is not None and schedule.sim_options.get('resample_trajectories'):
+            raise ValueError("resample_trajectories is not supported in expectation_values. Use run() instead.")
         if measurement is None:
             measurement = DefaultMeasurement1(self.device, self.model)
         circuit_fn = self._wrap(circuit_fn)
@@ -158,6 +169,20 @@ class Simulation:
         return self.simulator.simulate(
             circuit, initial_state=state, qubit_order=self.qubit_order
         ).state_vector()
+
+    def _unwrap_schedule(self, circuit_fn):
+        """If circuit_fn is a Schedule, extract its circuit_fn and apply sim_options.
+
+        Memoization size: schedule's 'circuit_memoization_size' if set, else
+        its cache_size (one slot per distinct circuit). +1 for the reset circuit.
+        """
+        if hasattr(circuit_fn, 'sim_options'):
+            schedule = circuit_fn
+            opts = schedule.sim_options
+            memo = opts.get('circuit_memoization_size', opts.get('n_cache', 1))
+            self.set_memoization_size(memo + 1)
+            return schedule, schedule.circuit_fn
+        return None, circuit_fn
 
     @staticmethod
     def _wrap(circuit_fn):

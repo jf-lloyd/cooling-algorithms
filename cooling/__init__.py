@@ -6,5 +6,4 @@ from .protocols import Protocol, DetailedBalanceProtocol
 from .measurements import Measurement, DefaultMeasurement1
 from .simulation import Simulation
 from .gates import YXPowGate, ZXPowGate
-from .schedules import Schedule, SimpleRandomized
-RandomPauliSchedule = SimpleRandomized  # legacy alias
+from .schedules import Schedule, Randomized, SimpleRandomized, RandomPauliSchedule
