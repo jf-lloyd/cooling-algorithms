@@ -26,18 +26,23 @@ class Randomized(Schedule):
     n_cache           : number of circuits to pre-build.
     seed              : RNG seed for reproducibility
     resample          : refresh the cache every resample steps (t=resample, 2*resample, ...); no refresh if None
+    parameterized     : if False (default), mark cached circuits as not parameterized
+                        (_is_parameterized_ -> False) so qsim/cirq skip the sympy
+                        scan and avoid copying the circuit (preserves memoization).
+                        The protocol builds concrete circuits, so this is safe.
     """
 
     def __init__(self, protocol, params: dict, coupling_geometry=None, coupling_ops=None,
                  allowed_ops=None, n_cache: int = 50, resample=None,
-                 resample_trajectories: bool = False, circuit_memoization_size=None, seed=None):
+                 resample_trajectories: bool = False,
+                 parameterized: bool = False, seed=None):
 
         super().__init__(protocol, params)
         self.params           = params
         self.coupling_geometry = coupling_geometry
         self.coupling_ops     = coupling_ops
         self.n_cache          = n_cache
-        self._memoization_override = circuit_memoization_size
+        self.parameterized    = parameterized
         if resample is not None and (not isinstance(resample, int) or resample <= 0):
             raise ValueError(f"resample must be a positive integer, got {resample!r}.")
         self.resample              = resample
@@ -128,11 +133,15 @@ class Randomized(Schedule):
                     seen.add(key)
                     self._cache.append(self.protocol.channel(geometry, coupling_ops, self.params))
 
+        if not self.parameterized:
+            # Circuits are concrete (no sympy): tell cirq/qsim so they skip the
+            # parameterization scan and don't copy the circuit on resolve.
+            for fc in self._cache:
+                fc._is_parameterized_ = lambda: False
+
     @property
     def sim_options(self) -> dict:
-        memo = self._memoization_override if self._memoization_override is not None else self.cache_size
         return {'n_cache': self.cache_size,
-                'circuit_memoization_size': memo,
                 'resample_trajectories': self.resample_trajectories}
 
     def fname(self) -> str:

@@ -21,15 +21,27 @@ class Simulation:
     Parameters
     ----------
     protocol : Protocol
+    
+    assume_trajectories : bool (default True)
+        The channel always contains a reset. Normally qsim rescans the whole circuit
+        on every simulate() call to discover trajectory MC is needed.
+        When True, we short-circuit qsim's _needs_trajectories to always return
+        True, skipping that scan. 
+        
     """
 
-    def __init__(self, protocol: "Protocol"):
+    def __init__(self, protocol: "Protocol", assume_trajectories: bool = True):
         self.protocol    = protocol
         self.device      = protocol.device
         self.model       = protocol.model
 
         # System qubits first: get_system_state reshape assumes this layout.
         self.qubit_order = self.device.qubits
+
+        self.assume_trajectories = assume_trajectories
+        if assume_trajectories:
+            # Module-global patch: every circuit here needs trajectories.
+            qsim.qsim_simulator._needs_trajectories = lambda circuit: True
 
         self.options = {'max_fused_gate_size': 4, 'use_gpu': False, 't': 2}
         self.memoization = 1
@@ -71,20 +83,22 @@ class Simulation:
         os.makedirs(path, exist_ok=True)
         record.to_pickle(os.path.join(path, fname + ".pkl"))
 
-    def run(self, circuit_fn, R: int, K: int = 1, measurement=None, seed=None) -> pd.DataFrame:
+    def run(self, circuit_fn, R: int, K: int = 1, measurement=None, seed=None,
+            circuit_memoization_size=None) -> pd.DataFrame:
         """
         Run K independent trajectories of R cooling steps each.
 
         circuit_fn  : Schedule, FrozenCircuit, or callable int → FrozenCircuit.
-                      If a Schedule, memoization is set automatically from sim_options.
         R           : number of cooling steps per trajectory
         K           : number of independent trajectories
         measurement : Measurement; defaults to DefaultMeasurement1
         seed        : RNG seed
+        circuit_memoization_size : override qsim memoization. If None and a
+                      Schedule is passed, defaults to the schedule cache size.
 
         Returns a DataFrame with columns {repeat, t, ...observables}.
         """
-        schedule, circuit_fn = self._unwrap_schedule(circuit_fn)
+        schedule, circuit_fn = self._unwrap_schedule(circuit_fn, circuit_memoization_size)
         if measurement is None:
             measurement = DefaultMeasurement1(self.device, self.model)
         circuit_fn = self._wrap(circuit_fn)
@@ -105,7 +119,8 @@ class Simulation:
 
         return pd.DataFrame(rows)
 
-    def expectation_values(self, circuit_fn, R: int, K: int = 1, measurement=None, seed=None) -> pd.DataFrame:
+    def expectation_values(self, circuit_fn, R: int, K: int = 1, measurement=None, seed=None,
+                           circuit_memoization_size=None) -> pd.DataFrame:
         """
         Run K trajectories of R cooling steps, using a concatenated circuit.
 
@@ -114,16 +129,17 @@ class Simulation:
         Measures at every Nth moment (end of each channel, after the reset layer).
 
         circuit_fn  : Schedule, FrozenCircuit, or callable int → FrozenCircuit.
-                      If a Schedule, memoization is set automatically from sim_options.
                       Note: resample_trajectories is not supported here.
         R           : number of cooling steps per trajectory
         K           : number of independent trajectories
         measurement : Measurement; defaults to DefaultMeasurement1
         seed        : RNG seed
+        circuit_memoization_size : override qsim memoization. If None and a
+                      Schedule is passed, defaults to the schedule cache size.
 
         Returns a DataFrame with columns {repeat, t, ...observables}.
         """
-        schedule, circuit_fn = self._unwrap_schedule(circuit_fn)
+        schedule, circuit_fn = self._unwrap_schedule(circuit_fn, circuit_memoization_size)
         if schedule is not None and schedule.sim_options.get('resample_trajectories'):
             raise ValueError("resample_trajectories is not supported in expectation_values. Use run() instead.")
         if measurement is None:
@@ -170,16 +186,15 @@ class Simulation:
             circuit, initial_state=state, qubit_order=self.qubit_order
         ).state_vector()
 
-    def _unwrap_schedule(self, circuit_fn):
-        """If circuit_fn is a Schedule, extract its circuit_fn and apply sim_options.
+    def _unwrap_schedule(self, circuit_fn, circuit_memoization_size=None):
+        """If circuit_fn is a Schedule, extract its circuit_fn and set memoization.
 
-        Memoization size: schedule's 'circuit_memoization_size' if set, else
-        its cache_size (one slot per distinct circuit). +1 for the reset circuit.
+        Memoization size: circuit_memoization_size if given, else the schedule
+        cache_size (one slot per distinct circuit). +1 for the reset circuit.
         """
         if hasattr(circuit_fn, 'sim_options'):
             schedule = circuit_fn
-            opts = schedule.sim_options
-            memo = opts.get('circuit_memoization_size', opts.get('n_cache', 1))
+            memo = circuit_memoization_size if circuit_memoization_size is not None else schedule.cache_size
             self.set_memoization_size(memo + 1)
             return schedule, schedule.circuit_fn
         return None, circuit_fn
