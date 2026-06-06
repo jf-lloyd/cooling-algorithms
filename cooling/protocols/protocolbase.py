@@ -50,10 +50,50 @@ class Protocol(ABC):
     @property
     def reset_layer(self):
         return self._reset_layer
-        
-        
+
     @abstractmethod
-    def channel(self, coupling_geometry: dict, params: dict) -> cirq.FrozenCircuit:
+    def coupling_gates(self, coupling_ops: dict) -> dict:
+        """
+        Defines the allowed system-bath gates of the protocol. 
+        Passed a dict {bath_idx : op_str} and returns a dict {bath_idx : op}
+        """
+
+    def validate_geometry(self, coupling_geometry: dict, coupling_ops: dict):
+        """
+        Validate coupling_geometry and coupling_ops.
+
+        - coupling_geometry and coupling_ops have the same keys.
+        - Keys equal the full set of bath qubit indices {0, ..., Nb-1}.
+        - All system qubit indices in coupling_geometry are valid (0 to Ns-1).
+
+        TODO: add validate option for cirq device fixed geometry.
+        """
+        Nb, Ns = self.device.Nb, self.device.Ns
+        expected = set(range(Nb))
+        geom_keys = set(coupling_geometry.keys())
+        ops_keys  = set(coupling_ops.keys())
+
+        if geom_keys != expected or ops_keys != expected:
+            missing_geom = expected - geom_keys
+            missing_ops  = expected - ops_keys
+            extra_geom   = geom_keys - expected
+            extra_ops    = ops_keys  - expected
+            msg = "coupling_geometry and coupling_ops must both contain all bath qubit indices."
+            if missing_geom: msg += f" coupling_geometry missing: {missing_geom}."
+            if missing_ops:  msg += f" coupling_ops missing: {missing_ops}."
+            if extra_geom:   msg += f" coupling_geometry unknown: {extra_geom}."
+            if extra_ops:    msg += f" coupling_ops unknown: {extra_ops}."
+            raise ValueError(msg)
+
+        invalid_sys = {si for si in coupling_geometry.values() if not (0 <= si < Ns)}
+        if invalid_sys:
+            raise ValueError(
+                f"coupling_geometry contains invalid system qubit indices {invalid_sys}. "
+                f"Valid range: 0 to {Ns - 1}."
+            )
+
+    @abstractmethod
+    def channel(self, coupling_geometry: dict, coupling_ops: dict, params: dict) -> cirq.FrozenCircuit:
         """
         Build and return one cooling-cycle.
         """
@@ -64,9 +104,9 @@ class Protocol(ABC):
         """Print the channel description (inc parameters required by channel) for this protocol."""
         print(self.channel.__doc__)
 
-    def draw_channel(self, coupling_geometry: dict, params: dict, save: str = None):
+    def draw_channel(self, coupling_geometry: dict, coupling_ops: dict, params: dict, save: str = None):
         """Draw the cooling channel circuit. Pass save='filename.svg' to save."""
-        C = cirq.Circuit(self.channel(coupling_geometry, params))
+        C = cirq.Circuit(self.channel(coupling_geometry, coupling_ops, params))
         print(f"Circuit: {len(C) - 1} moments + reset")
         try:
             from IPython.display import display
@@ -79,7 +119,6 @@ class Protocol(ABC):
                 print(f"Saved to {save}")
         except ImportError:
             print(C)
-        return C
 
     # ______ helpers for getting parameter values _____ 
     
