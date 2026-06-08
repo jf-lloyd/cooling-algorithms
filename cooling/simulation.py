@@ -196,7 +196,7 @@ class Simulation:
         Same API as run(). n_workers defaults to min(K, cpu_count).
         Custom measurements not supported (PauliSum not picklable).
         """
-        schedule, _ = self._unwrap_schedule(circuit_fn, circuit_memoization_size)
+        schedule, raw_circuit_fn = self._unwrap_schedule(circuit_fn, circuit_memoization_size)
 
         if schedule is not None:
             fname = self._build_fname(schedule, R, K, tag)
@@ -219,8 +219,10 @@ class Simulation:
         base, rem = divmod(K, n_workers)
         k_splits = [base + (1 if i < rem else 0) for i in range(n_workers)]
 
+        # Pass the raw callable (not the Schedule) so workers don't trigger
+        # file-existence checks or auto-saves independently.
         worker_args = [
-            (self.protocol, circuit_fn, R, k, measure_every, ws, circuit_memoization_size)
+            (self.protocol, raw_circuit_fn, R, k, measure_every, ws, circuit_memoization_size)
             for k, ws in zip(k_splits, worker_seeds)
         ]
 
