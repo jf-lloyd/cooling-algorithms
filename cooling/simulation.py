@@ -140,7 +140,7 @@ class Simulation:
         if schedule is not None:
             fname = self._build_fname(schedule, R, K, tag)
             path = save_path or self._default_path
-            full_path = os.path.join(path, fname + ".pkl")
+            full_path = os.path.join(path, fname + ".parquet")
             if os.path.exists(full_path) and not overwrite:
                 raise FileExistsError(
                     f"Output file already exists: {full_path}\n"
@@ -201,7 +201,7 @@ class Simulation:
         if schedule is not None:
             fname = self._build_fname(schedule, R, K, tag)
             path = save_path or self._default_path
-            full_path = os.path.join(path, fname + ".pkl")
+            full_path = os.path.join(path, fname + ".parquet")
             if os.path.exists(full_path) and not overwrite:
                 raise FileExistsError(
                     f"Output file already exists: {full_path}\n"
