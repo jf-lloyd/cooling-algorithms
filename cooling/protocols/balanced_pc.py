@@ -18,9 +18,9 @@ class DetailedBalanceProtocol(Protocol):
     Supported system-bath coupling gates: 'XX', 'YX', 'ZX', 'iSWAP'.
     """
 
-    def __init__(self, device:"CoolingDevice", model:"Model", gamma:float=0., function="gaussian"):
+    def __init__(self, device:"CoolingDevice", model:"Model", params:dict=None, gamma:float=0., function="gaussian"):
 
-        super().__init__(device, model, gamma)
+        super().__init__(device, model, params, gamma)
 
         self.function = function
         if function == "gaussian":
@@ -32,7 +32,14 @@ class DetailedBalanceProtocol(Protocol):
 
     @property
     def name(self):
-        return 'no_name'
+        p = self.params
+        parts = []
+        for key, fmt in [('beta', 'b{:.2f}'), ('delta', 'd{:.4f}'),
+                         ('h', 'h{:.2f}'), ('theta', 'th{:.3f}')]:
+            if key in p:
+                parts.append(fmt.format(p[key]))
+        parts.append(self.function)
+        return "_".join(parts)
 
     @property
     def print_channel_description(self):
@@ -91,7 +98,7 @@ class DetailedBalanceProtocol(Protocol):
 
     # ── Main channel builder ──────────────────────────────────────────────────
 
-    def channel(self, coupling_geometry:dict, coupling_ops:dict, params:dict) -> cirq.FrozenCircuit:
+    def channel(self, coupling_geometry:dict, coupling_ops:dict, params:dict=None) -> cirq.FrozenCircuit:
         """
         DetailedBalanceProtocol channel. Supported coupling gates (SB) 'XX', 'YX', 'ZX', 'iSWAP'
 
@@ -110,6 +117,7 @@ class DetailedBalanceProtocol(Protocol):
         """
         self.validate_geometry(coupling_geometry, coupling_ops)
 
+        params = {**self.params, **(params or {})}
         beta  = self.require_real(params, "beta")
         delta = self.require_real(params, "delta")
         h     = self.require_real(params, "h")

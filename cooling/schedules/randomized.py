@@ -23,7 +23,6 @@ class Randomized(Schedule):
     Parameters
     ----------
     protocol          : Protocol
-    params            : dict — channel params (beta, delta, h, theta, NT, ...).
     coupling_geometry : dict {bath_idx: sys_idx} or None. Fixed geometry if provided; random per circuit if None.
     coupling_ops      : dict {bath_idx: op_str} or None. Fixed coupling ops if provided; random per circuit if None.
     allowed_ops       : list [op_str] or None. Draw from a subset of allowed coupling operators if provided;
@@ -34,13 +33,12 @@ class Randomized(Schedule):
     parameterized     : if False (default), mark cached circuits as not parameterized so qsim skip the sympy scan.
     """
 
-    def __init__(self, protocol, params: dict, coupling_geometry=None, coupling_ops=None,
+    def __init__(self, protocol, coupling_geometry=None, coupling_ops=None,
                  allowed_ops=None, n_cache: int = 50, resample=None,
                  resample_trajectories: bool = False,
                  parameterized: bool = False, seed=None):
 
         super().__init__(protocol)
-        self.params           = params
         self.coupling_geometry = coupling_geometry
         self.coupling_ops     = coupling_ops
         self.n_cache          = n_cache
@@ -71,6 +69,10 @@ class Randomized(Schedule):
         self._build_rng = rng
 
         self.build_cache()
+
+    @property
+    def name(self) -> str:
+        return "rand"
 
     def build_cache(self, _warn=True):
         """
@@ -107,7 +109,7 @@ class Randomized(Schedule):
             for idx in selected_idx:
                 geom_tuple, ops_tuple = all_configs[idx]
                 self._cache.append(self.protocol.channel(
-                    dict(enumerate(geom_tuple)), dict(enumerate(ops_tuple)), self.params))
+                    dict(enumerate(geom_tuple)), dict(enumerate(ops_tuple))))
         else:
             # Rejection sampling — collisions rare when n_cache << n_possible
             expected_extra = effective_n ** 2 / (2 * n_possible)
@@ -133,7 +135,7 @@ class Randomized(Schedule):
                 ))
                 if key not in seen:
                     seen.add(key)
-                    self._cache.append(self.protocol.channel(geometry, coupling_ops, self.params))
+                    self._cache.append(self.protocol.channel(geometry, coupling_ops))
 
         if not self.parameterized:
             # Circuits are concrete (no sympy): tell cirq/qsim so they skip the
@@ -146,8 +148,9 @@ class Randomized(Schedule):
         return {'n_cache': self.cache_size,
                 'resample_trajectories': self.resample_trajectories}
 
+    @property
     def fname(self) -> str:
-        return f"{self.protocol.name}_rand"
+        return f"{self.protocol.model.name}_{self.protocol.name}_rand"
 
     def circuit_fn(self, t: int) -> cirq.FrozenCircuit:
         if self.resample is not None and t % self.resample == 0:

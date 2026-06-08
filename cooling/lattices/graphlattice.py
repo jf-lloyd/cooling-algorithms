@@ -4,6 +4,7 @@ A lattice build from a networkx graph -- used to build lattice for pre-built cir
 Created by Jerome Lloyd on 3rd June 2026
 """
 
+from __future__ import annotations
 from .latticebase import Lattice
 
 class GraphLattice(Lattice):

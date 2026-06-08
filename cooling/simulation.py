@@ -88,16 +88,36 @@ class Simulation:
 
     # ── Simulation methods ────────────────────────────────────────────────────
 
-    def save(self, record: pd.DataFrame, fname: str = "test_data",
-             path: str = None):
+    @property
+    def _default_path(self):
+        return os.path.join(os.path.dirname(__file__), "..", "data", "simulations")
+
+    @staticmethod
+    def _build_fname(schedule, R: int, K: int, tag: str = None) -> str:
+        fname = f"{schedule.fname}_R{R}K{K}"
+        if tag:
+            fname += f"_{tag}"
+        return fname
+
+    def get_path(self, schedule, R: int, K: int, tag: str = None, save_path: str = None) -> str:
+        """Return the full path of a saved simulation file."""
+        path = save_path or self._default_path
+        return os.path.join(path, self._build_fname(schedule, R, K, tag) + ".pkl")
+
+    def load(self, schedule, R: int, K: int, tag: str = None, save_path: str = None) -> pd.DataFrame:
+        """Load a saved simulation record."""
+        return pd.read_pickle(self.get_path(schedule, R, K, tag, save_path))
+
+    def save(self, record: pd.DataFrame, fname: str = "test_data", path: str = None):
         """Save a simulation record as a pickle file."""
         if path is None:
-            path = os.path.join(os.path.dirname(__file__), "..", "data", "simulations")
+            path = self._default_path
         os.makedirs(path, exist_ok=True)
         record.to_pickle(os.path.join(path, fname + ".pkl"))
 
     def run(self, circuit_fn, R: int, K: int = 1, measurement=None, measure_every: int = 1, seed=None,
-            circuit_memoization_size=None) -> pd.DataFrame:
+            circuit_memoization_size=None, tag: str = None, save_path: str = None,
+            overwrite: bool = False) -> pd.DataFrame:
         """
         Run K independent trajectories of R cooling steps each.
 
@@ -109,10 +129,23 @@ class Simulation:
         seed         : RNG seed
         circuit_memoization_size : override qsim memoization. If None and a
                        Schedule is passed, defaults to the schedule cache size.
+        tag          : appended to filename when auto-saving
+        save_path    : override default save directory.
+        overwrite    : if False (default), abort before running if the output file already exists.
 
         Returns a DataFrame with columns {repeat, t, ...observables}.
         """
         schedule, circuit_fn = self._unwrap_schedule(circuit_fn, circuit_memoization_size)
+
+        if schedule is not None:
+            fname = self._build_fname(schedule, R, K, tag)
+            path = save_path or self._default_path
+            full_path = os.path.join(path, fname + ".pkl")
+            if os.path.exists(full_path) and not overwrite:
+                raise FileExistsError(
+                    f"Output file already exists: {full_path}\n"
+                    f"change file tag or set overwrite=True to overwrite."
+                )
         if measurement is None:
             measurement = DefaultMeasurement1(self.device, self.model)
         circuit_fn = self._wrap(circuit_fn)
@@ -147,18 +180,34 @@ class Simulation:
                     rows.append({"repeat": k, "t": t,
                                  **measurement.measure_from_state_vector(self.get_system_state(state))})
 
-        return pd.DataFrame(rows)
+        record = pd.DataFrame(rows)
+
+        if schedule is not None:
+            self.save(record, fname=fname, path=path)
+
+        return record
 
     def run_parallel(self, circuit_fn, R: int, K: int, n_workers: int = None,
-                     measurement=None, measure_every: int = 1, seed=None,
-                     circuit_memoization_size=None) -> pd.DataFrame:
+                     measure_every: int = 1, seed=None, circuit_memoization_size=None,
+                     tag: str = None, save_path: str = None, overwrite: bool = False) -> pd.DataFrame:
         """
         Run K trajectories split across n_workers processes.
 
         Same API as run(). n_workers defaults to min(K, cpu_count).
+        Custom measurements not supported (PauliSum not picklable).
         """
-        if measurement is not None:
-            raise NotImplementedError("Custom measurements are not supported in run_parallel; use run() instead.")
+        schedule, _ = self._unwrap_schedule(circuit_fn, circuit_memoization_size)
+
+        if schedule is not None:
+            fname = self._build_fname(schedule, R, K, tag)
+            path = save_path or self._default_path
+            full_path = os.path.join(path, fname + ".pkl")
+            if os.path.exists(full_path) and not overwrite:
+                raise FileExistsError(
+                    f"Output file already exists: {full_path}\n"
+                    f"Change file tag or set overwrite=True to overwrite."
+                )
+
         if n_workers is None:
             n_workers = min(K, _mp.cpu_count())
         n_workers = min(n_workers, K)
@@ -187,7 +236,12 @@ class Simulation:
             offset += int(df['repeat'].max()) + 1
             out.append(df)
 
-        return pd.concat(out, ignore_index=True)
+        record = pd.concat(out, ignore_index=True)
+
+        if schedule is not None:
+            self.save(record, fname=fname, path=path)
+
+        return record
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 

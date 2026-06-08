@@ -34,6 +34,18 @@ class Schedule(ABC):
         return {'n_cache': self.cache_size,
                 'resample_trajectories': False}
 
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Short identifier for this schedule (used in filenames)."""
+        pass
+
+    @property
+    @abstractmethod
+    def fname(self) -> str:
+        """Full filename stem for saving simulation results."""
+        pass
+
     @abstractmethod
     def circuit_fn(self, t: int) -> cirq.FrozenCircuit:
         """Return the circuit to run at step t."""

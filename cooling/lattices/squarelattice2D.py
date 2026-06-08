@@ -27,7 +27,8 @@ class SquareLattice2D(Lattice):
 
     @property
     def name(self):
-        return f"square2D_Lx{self._Lx}Ly{self._Ly}"
+        pbc = ("Px" if self.pbc_x else "") + ("Py" if self.pbc_y else "")
+        return f"square2D_Lx{self._Lx}Ly{self._Ly}{pbc}"
 
     def coords(self, s):
         x = s % self._Lx

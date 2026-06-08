@@ -23,7 +23,7 @@ class ChainLattice1D(Lattice):
 
     @property
     def name(self):
-        return f"chain1D_L{self._L}"
+        return f"chain1D_L{self._L}" + ("P" if self.pbc else "")
 
     def coords(self, s):
         return (s,)

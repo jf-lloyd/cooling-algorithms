@@ -26,9 +26,10 @@ class Protocol(ABC):
     _COUPLING_GATE_MAP = {'X': cirq.XXPowGate,'Y': YXPowGate,'Z': ZXPowGate, 'iSWAP':  cirq.ISwapPowGate}
 
 
-    def __init__(self, device:"CoolingDevice", model:"Model", gamma:float=0.):
+    def __init__(self, device:"CoolingDevice", model:"Model", params:dict=None, gamma:float=0.):
         self.device = device
         self.model = model
+        self.params = params if params is not None else {}
 
         # Reset layer: identity on system qubits, reset on bath qubits.
         self._reset_layer = ([cirq.I(q) for q in device.system_qubits]
