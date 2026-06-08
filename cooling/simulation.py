@@ -102,18 +102,18 @@ class Simulation:
     def get_path(self, schedule, R: int, K: int, tag: str = None, save_path: str = None) -> str:
         """Return the full path of a saved simulation file."""
         path = save_path or self._default_path
-        return os.path.join(path, self._build_fname(schedule, R, K, tag) + ".pkl")
+        return os.path.join(path, self._build_fname(schedule, R, K, tag) + ".parquet")
 
     def load(self, schedule, R: int, K: int, tag: str = None, save_path: str = None) -> pd.DataFrame:
         """Load a saved simulation record."""
-        return pd.read_pickle(self.get_path(schedule, R, K, tag, save_path))
+        return pd.read_parquet(self.get_path(schedule, R, K, tag, save_path))
 
     def save(self, record: pd.DataFrame, fname: str = "test_data", path: str = None):
-        """Save a simulation record as a pickle file."""
+        """Save a simulation record as a parquet file."""
         if path is None:
             path = self._default_path
         os.makedirs(path, exist_ok=True)
-        record.to_pickle(os.path.join(path, fname + ".pkl"))
+        record.to_parquet(os.path.join(path, fname + ".parquet"))
 
     def run(self, circuit_fn, R: int, K: int = 1, measurement=None, measure_every: int = 1, seed=None,
             circuit_memoization_size=None, tag: str = None, save_path: str = None,
