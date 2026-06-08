@@ -1,7 +1,10 @@
 from .lattices import Lattice, ChainLattice1D, SquareLattice2D, TriangularLattice2D, GraphLattice
 from .device import CoolingDevice
 from .models import Model, IsingModel, HeisenbergModel, XYModel
-from .ed import ModelSpec, ThermalEnergy
+try:
+    from .ed import ModelSpec, ThermalEnergy
+except ImportError:
+    pass
 from .protocols import Protocol, DetailedBalanceProtocol
 from .measurements import Measurement, DefaultMeasurement1
 from .simulation import Simulation
