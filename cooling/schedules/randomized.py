@@ -150,7 +150,8 @@ class Randomized(Schedule):
 
     @property
     def fname(self) -> str:
-        return f"{self.protocol.model.name}_{self.protocol.name}_rand"
+        Nb = self.protocol.device.Nb
+        return f"{self.protocol.model.name}_Nb{Nb}_{self.protocol.name}_rand"
 
     def circuit_fn(self, t: int) -> cirq.FrozenCircuit:
         if self.resample is not None and t % self.resample == 0:
