@@ -69,12 +69,25 @@ class Simulation:
 
     def get_system_state(self, state_vector):
         """
-        Reduced state on system qubits (valid immediately after a reset layer).
+        System state after the final bath reset layer.
 
         With qubit_order = system + bath, system occupies the high-order bits.
-        Reshaping to (2**Ns, 2**Nb) and taking column 0 selects bath=|0…0>.
+        In the noiseless case the bath is |0...0>, so column 0 is the system
+        state. With reset noise, the bath can be flipped to another
+        computational basis state; select the occupied bath sector instead.
         """
-        return state_vector.reshape(2 ** self.device.Ns, 2 ** self.device.Nb)[:, 0]
+        psi = state_vector.reshape(2 ** self.device.Ns, 2 ** self.device.Nb)
+        bath_probs = np.sum(np.abs(psi) ** 2, axis=0)
+        occupied = np.flatnonzero(bath_probs > 1e-10)
+
+        if len(occupied) != 1:
+            raise ValueError(
+                "Expected the bath to occupy one basis state after reset, "
+                f"found probabilities {bath_probs}."
+            )
+
+        col = int(occupied[0])
+        return psi[:, col] / np.sqrt(bath_probs[col])
 
     def _initial_state(self, rng):
         """Random computational basis state with bath reset to |0…0>."""
