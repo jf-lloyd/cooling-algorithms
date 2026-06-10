@@ -17,41 +17,37 @@ class Protocol(ABC):
 
     Parameters
     ----------
-    device : CoolingDevice
-    model  : Model
-    gamma  : float - depolarising noise strength. 0 = off (default).
+    device      : CoolingDevice
+    model       : Model
+    noise_model : cirq.NoiseModel or None - applied once to the channel circuit
+                  via `circuit.with_noise(noise_model)` (see apply_noise()).
+                  None (default) = noiseless.
     """
 
     ## override in subclass if needed
     _COUPLING_GATE_MAP = {'X': cirq.XXPowGate,'Y': YXPowGate,'Z': ZXPowGate, 'iSWAP':  cirq.ISwapPowGate}
 
 
-    def __init__(self, device:"CoolingDevice", model:"Model", params:dict=None, gamma:float=0.):
+    def __init__(self, device:"CoolingDevice", model:"Model", params:dict=None, noise_model:"cirq.NoiseModel|None"=None):
         self.device = device
         self.model = model
         self.params = params if params is not None else {}
+        self.noise_model = noise_model
 
         # Reset layer: identity on system qubits, reset on bath qubits.
         self._reset_layer = ([cirq.I(q) for q in device.system_qubits]
             + [cirq.reset(q) for q in device.bath_qubits])
 
-        # Noise layer: only non-trivial if gamma != 0
-        self._noise_layer = None
-        if gamma != 0.0:
-            self.make_noise_layer(gamma)
-        
-    def make_noise_layer(self, gamma):
-        # default noise layer: depolarising on all qubits. Subclass can overwrite
-        self._noise_layer = [cirq.depolarize(gamma).on(q) for q in self.device.qubits]
+    def apply_noise(self, circuit: cirq.Circuit) -> cirq.Circuit:
+        """Apply self.noise_model to circuit (one-time rewrite); no-op if None."""
+        if self.noise_model is None:
+            return circuit
+        return circuit.with_noise(self.noise_model)
 
     @property
     @abstractmethod
     def name(self):
         pass
-
-    @property
-    def noise_layer(self):
-        return self._noise_layer
 
     @property
     def reset_layer(self):
@@ -109,7 +105,7 @@ class Protocol(ABC):
     @abstractmethod
     def channel(self, coupling_geometry: dict, coupling_ops: dict, params: dict) -> cirq.FrozenCircuit:
         """
-        Build and return one cooling-cycle.
+        Build and return one cooling-cycle. Implement in subclass.
         """
         pass
 
@@ -118,8 +114,13 @@ class Protocol(ABC):
         """Print the channel description (inc parameters required by channel) for this protocol."""
         print(self.channel.__doc__)
 
-    def draw_channel(self, coupling_geometry: dict, coupling_ops: dict, params: dict, save: str = None):
-        """Draw the cooling channel circuit. Pass save='filename.svg' to save."""
+    def draw_channel(self, coupling_geometry: dict, coupling_ops: dict = None, params: dict = None, save: str = None):
+        """Draw the cooling channel circuit. Pass save='filename.svg' to save.
+
+        coupling_ops defaults to 'X' on every bath qubit in coupling_geometry.
+        """
+        if coupling_ops is None:
+            coupling_ops = {bi: 'X' for bi in coupling_geometry}
         C = cirq.Circuit(self.channel(coupling_geometry, coupling_ops, params))
         print(f"Circuit: {len(C) - 1} moments + reset")
         try:

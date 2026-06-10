@@ -18,9 +18,9 @@ class DetailedBalanceProtocol(Protocol):
     Supported system-bath coupling gates: 'XX', 'YX', 'ZX', 'iSWAP'.
     """
 
-    def __init__(self, device:"CoolingDevice", model:"Model", params:dict=None, gamma:float=0., function="gaussian"):
+    def __init__(self, device:"CoolingDevice", model:"Model", params:dict=None, noise_model:"cirq.NoiseModel|None"=None, function="gaussian"):
 
-        super().__init__(device, model, params, gamma)
+        super().__init__(device, model, params, noise_model)
 
         self.function = function
         if function == "gaussian":
@@ -77,7 +77,7 @@ class DetailedBalanceProtocol(Protocol):
         flist = self.filter_function(beta, delta, h, NT)
         MT    = len(flist) // 2
         tlist = np.arange(-MT, MT + 1)
-        return np.sum([flist[t] * np.exp(1j * (h - omega) * tlist[t]) for t in range(len(tlist))])
+        return np.sum([flist[t] * np.exp(1j * (h - omega) * delta * tlist[t]) for t in range(len(tlist))])
 
     # ── Circuit building helpers ──────────────────────────────────────────────
 
@@ -134,7 +134,6 @@ class DetailedBalanceProtocol(Protocol):
             bath_ops = [u**delta for u in self._get_bath_layer(h)]
         c_ops = [u**delta for u in self._get_coupling_layer(coupling_geometry, coupling_ops, theta)]
 
-        noise_layer = self._noise_layer
         reset_layer = self._reset_layer
 
         cycle = cirq.Circuit()
@@ -142,8 +141,8 @@ class DetailedBalanceProtocol(Protocol):
             cycle.append(sys_ops)
             cycle.append(bath_ops)
             cycle.append(u**filter_f[j] for u in c_ops)
-            if noise_layer is not None:
-                cycle.append(noise_layer)
         cycle.append(reset_layer)
-        
+
+        cycle = self.apply_noise(cycle)
+
         return cirq.FrozenCircuit(cycle)

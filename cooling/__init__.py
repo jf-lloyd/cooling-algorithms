@@ -9,4 +9,5 @@ from .protocols import Protocol, DetailedBalanceProtocol
 from .measurements import Measurement, DefaultMeasurement1
 from .simulation import Simulation
 from .gates import YXPowGate, ZXPowGate
+from .noise import BasicNoiseModel
 from .schedules import Schedule, Randomized, SimpleRandomized, RandomPauliSchedule
