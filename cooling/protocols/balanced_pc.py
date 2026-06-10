@@ -18,7 +18,7 @@ class DetailedBalanceProtocol(Protocol):
     Supported system-bath coupling gates: 'XX', 'YX', 'ZX', 'iSWAP'.
     """
 
-    def __init__(self, device:"CoolingDevice", model:"Model", params:dict=None, noise_model:"cirq.NoiseModel|None"=None, function="gaussian"):
+    def __init__(self, device:"CoolingDevice", model:"Model", params:dict=None, noise_model:"cirq.NoiseModel|None"=None, function="gaussian", trotter_order=1):
 
         super().__init__(device, model, params, noise_model)
 
@@ -30,6 +30,10 @@ class DetailedBalanceProtocol(Protocol):
         else:
             raise ValueError(f"Unknown filter function {function!r}. Choose 'gaussian' or 'mcp'.")
 
+        if trotter_order not in (1, 2):
+            raise ValueError(f"trotter_order must be 1 or 2, got {trotter_order!r}.")
+        self.trotter_order = trotter_order
+
     @property
     def name(self):
         p = self.params
@@ -39,6 +43,8 @@ class DetailedBalanceProtocol(Protocol):
             if key in p:
                 parts.append(fmt.format(p[key]))
         parts.append(self.function)
+        if self.trotter_order == 2:
+            parts.append("o2")
         return "_".join(parts)
 
     @property
@@ -77,7 +83,10 @@ class DetailedBalanceProtocol(Protocol):
         flist = self.filter_function(beta, delta, h, NT)
         MT    = len(flist) // 2
         tlist = np.arange(-MT, MT + 1)
-        return np.sum([flist[t] * np.exp(1j * (h - omega) * delta * tlist[t]) for t in range(len(tlist))])
+        if self.function == "mcp": # don't multiply h by delta
+            return np.sum([flist[t] * np.exp(1j * (h - omega * delta ) * tlist[t]) for t in range(len(tlist))])
+        else:
+            return np.sum([flist[t] * np.exp(1j * (h - omega) * delta * tlist[t]) for t in range(len(tlist))])
 
     # ── Circuit building helpers ──────────────────────────────────────────────
 
@@ -113,6 +122,13 @@ class DetailedBalanceProtocol(Protocol):
             Optional:
                 NT     : int (default 5) — filter truncation / circuit depth
 
+        trotter_order (set in __init__, default 1):
+            1 — first-order (Lie-Trotter) split: sys(δ) -> bath(δ) -> coupling(δ·f[j])
+                per step, error O(δ) global.
+            2 — second-order (Strang) split with merged half-steps ("leapfrog"):
+                sys(δ/2) -> [bath(δ/2) -> coupling(δ·f[j]) -> bath(δ/2) -> sys(δ)]*
+                -> ... -> sys(δ/2), error O(δ²) global, ~4/3x gates per step.
+
         Use Protocol.draw_channel(coupling_geometry, coupling_ops, params) to visualise.
         """
         self.validate_geometry(coupling_geometry, coupling_ops)
@@ -127,20 +143,39 @@ class DetailedBalanceProtocol(Protocol):
         filter_f = self.filter_function(beta, delta, h, NT)
         MT       = len(filter_f) // 2
 
-        sys_ops  = [u**delta for u in self.model.system_layer]
-        if self.function == "mcp":
-            bath_ops = list(self._get_bath_layer(h))
-        else:
-            bath_ops = [u**delta for u in self._get_bath_layer(h)]
         c_ops = [u**delta for u in self._get_coupling_layer(coupling_geometry, coupling_ops, theta)]
-
         reset_layer = self._reset_layer
 
         cycle = cirq.Circuit()
-        for j in range(2 * MT + 1):
-            cycle.append(sys_ops)
-            cycle.append(bath_ops)
-            cycle.append(u**filter_f[j] for u in c_ops)
+
+        if self.trotter_order == 1:
+            sys_ops  = [u**delta for u in self.model.system_layer]
+            if self.function == "mcp":
+                bath_ops = list(self._get_bath_layer(h))
+            else:
+                bath_ops = [u**delta for u in self._get_bath_layer(h)]
+
+            for j in range(2 * MT + 1):
+                cycle.append(sys_ops)
+                cycle.append(bath_ops)
+                cycle.append(u**filter_f[j] for u in c_ops)
+
+        else:  # trotter_order == 2: Strang split with merged half-steps
+            sys_full = [u**delta for u in self.model.system_layer]
+            sys_half = [u**(delta / 2) for u in self.model.system_layer]
+            if self.function == "mcp":
+                bath_half = [u**0.5 for u in self._get_bath_layer(h)]
+            else:
+                bath_half = [u**(delta / 2) for u in self._get_bath_layer(h)]
+
+            N = 2 * MT + 1
+            cycle.append(sys_half)
+            for j in range(N):
+                cycle.append(bath_half)
+                cycle.append(u**filter_f[j] for u in c_ops)
+                cycle.append(bath_half)
+                cycle.append(sys_full if j < N - 1 else sys_half)
+
         cycle.append(reset_layer)
 
         cycle = self.apply_noise(cycle)
