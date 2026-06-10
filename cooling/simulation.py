@@ -19,11 +19,14 @@ from .measurements import DefaultMeasurement1
 def _parallel_worker(args):
     protocol, circuit_fn, R, k_worker, measure_every, seed, circuit_memoization_size = args
     sim = Simulation(protocol)
+    if circuit_memoization_size is not None and not hasattr(circuit_fn, 'sim_options'):
+        sim.set_memoization_size(circuit_memoization_size)
     return sim.run(
         circuit_fn, R, k_worker,
         measure_every=measure_every,
         seed=seed,
         circuit_memoization_size=circuit_memoization_size,
+        _save=False,
     )
 
 
@@ -130,7 +133,7 @@ class Simulation:
 
     def run(self, circuit_fn, R: int, K: int = 1, measurement=None, measure_every: int = 1, seed=None,
             circuit_memoization_size=None, tag: str = None, save_path: str = None,
-            overwrite: bool = False) -> pd.DataFrame:
+            overwrite: bool = False, _save: bool = True) -> pd.DataFrame:
         """
         Run K independent trajectories of R cooling steps each.
 
@@ -148,9 +151,10 @@ class Simulation:
 
         Returns a DataFrame with columns {repeat, t, ...observables}.
         """
+        self._validate_run_args(R, K, measure_every)
         schedule, circuit_fn = self._unwrap_schedule(circuit_fn, circuit_memoization_size)
 
-        if schedule is not None:
+        if schedule is not None and _save:
             fname = self._build_fname(schedule, R, K, tag)
             path = save_path or self._default_path
             full_path = os.path.join(path, fname + ".parquet")
@@ -176,7 +180,10 @@ class Simulation:
         # Reseed the schedule's circuit-selection RNG so repeated run() calls
         # with the same seed draw the same sequence of circuits from the cache.
         if schedule is not None:
-            schedule._rng = np.random.default_rng(schedule_seed)
+            selection_seed, build_seed = schedule_seed.spawn(2)
+            schedule._rng = np.random.default_rng(selection_seed)
+            if hasattr(schedule, '_build_rng'):
+                schedule._build_rng = np.random.default_rng(build_seed)
 
         rows = []
 
@@ -195,7 +202,7 @@ class Simulation:
 
         record = pd.DataFrame(rows)
 
-        if schedule is not None:
+        if schedule is not None and _save:
             self.save(record, fname=fname, path=path)
 
         return record
@@ -209,6 +216,7 @@ class Simulation:
         Same API as run(). n_workers defaults to min(K, cpu_count).
         Custom measurements not supported (PauliSum not picklable).
         """
+        self._validate_run_args(R, K, measure_every)
         schedule, raw_circuit_fn = self._unwrap_schedule(circuit_fn, circuit_memoization_size)
 
         if schedule is not None:
@@ -223,6 +231,8 @@ class Simulation:
 
         if n_workers is None:
             n_workers = min(K, _mp.cpu_count())
+        if n_workers <= 0:
+            raise ValueError(f"n_workers must be positive, got {n_workers!r}.")
         n_workers = min(n_workers, K)
 
         ss = np.random.SeedSequence(seed)
@@ -232,10 +242,12 @@ class Simulation:
         base, rem = divmod(K, n_workers)
         k_splits = [base + (1 if i < rem else 0) for i in range(n_workers)]
 
-        # Pass the raw callable (not the Schedule) so workers don't trigger
-        # file-existence checks or auto-saves independently.
+        # Workers receive the Schedule itself so each process can reseed its
+        # local schedule copy and honor resample_trajectories. Worker-side
+        # saving is disabled in _parallel_worker.
+        worker_circuit_fn = schedule if schedule is not None else raw_circuit_fn
         worker_args = [
-            (self.protocol, raw_circuit_fn, R, k, measure_every, ws, circuit_memoization_size)
+            (self.protocol, worker_circuit_fn, R, k, measure_every, ws, circuit_memoization_size)
             for k, ws in zip(k_splits, worker_seeds)
         ]
 
@@ -278,6 +290,15 @@ class Simulation:
             self.set_memoization_size(memo + 1)
             return schedule, schedule.circuit_fn
         return None, circuit_fn
+
+    @staticmethod
+    def _validate_run_args(R: int, K: int, measure_every: int):
+        if R < 0:
+            raise ValueError(f"R must be non-negative, got {R!r}.")
+        if K <= 0:
+            raise ValueError(f"K must be positive, got {K!r}.")
+        if measure_every <= 0:
+            raise ValueError(f"measure_every must be positive, got {measure_every!r}.")
 
     @staticmethod
     def _wrap(circuit_fn):
