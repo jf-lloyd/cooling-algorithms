@@ -21,7 +21,7 @@ class Measurement:
     def measure_from_state_vector(self, state):
         measurement = {}
         for name, (operator, herm) in self._measures.items():
-            val = operator.expectation_from_state_vector(state, qubit_map = self.device.qubit_index_map)
+            val = operator.expectation_from_state_vector(state, qubit_map = self.device.qubit_index_map, check_preconditions=False)
             if herm:
                 if abs(val.imag) > 1e-5:
                     raise ValueError(f"Observable '{name}' returned non-negligible imaginary part {val.imag:.2e}; check operator is Hermitian.")
