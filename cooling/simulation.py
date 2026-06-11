@@ -79,7 +79,9 @@ class Simulation:
         state. With reset noise, the bath can be flipped to another
         computational basis state; select the occupied bath sector instead.
         """
-        psi = state_vector.reshape(2 ** self.device.Ns, 2 ** self.device.Nb)
+        psi = np.asarray(state_vector, dtype=np.complex128).reshape(
+            2 ** self.device.Ns, 2 ** self.device.Nb
+        )
         bath_probs = np.sum(np.abs(psi) ** 2, axis=0)
         occupied = np.flatnonzero(bath_probs > 1e-10)
 
@@ -90,7 +92,14 @@ class Simulation:
             )
 
         col = int(occupied[0])
-        return psi[:, col] / np.sqrt(bath_probs[col])
+        system_state = psi[:, col]
+        system_norm = np.linalg.norm(system_state)
+        if not np.isclose(system_norm, 1.0, atol=1e-4):
+            raise ValueError(
+                "System state norm drifted too far from 1 after bath projection: "
+                f"{system_norm}."
+            )
+        return system_state / system_norm
 
     def _initial_state(self, rng):
         """Random computational basis state with bath reset to |0…0>."""

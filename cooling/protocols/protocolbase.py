@@ -114,6 +114,36 @@ class Protocol(ABC):
         """Print the channel description (inc parameters required by channel) for this protocol."""
         print(self.channel.__doc__)
 
+    def channel_depth(self, coupling_geometry: dict = None, coupling_ops: dict = None, params: dict = None) -> tuple[int, int, int]:
+        """Print and return channel size: moments, total gates, and 2-qubit gates.
+
+        coupling_geometry defaults to bath i coupled to system i.
+        coupling_ops defaults to 'X' on every bath qubit in coupling_geometry.
+        """
+        if coupling_geometry is None:
+            coupling_geometry = {bi: bi for bi in range(self.device.Nb)}
+        if coupling_ops is None:
+            coupling_ops = {bi: 'X' for bi in coupling_geometry}
+
+        old_verbose = getattr(self, 'verbose', None)
+        if old_verbose is not None:
+            self.verbose = True
+        try:
+            circuit = cirq.Circuit(self.channel(coupling_geometry, coupling_ops, params))
+        finally:
+            if old_verbose is not None:
+                self.verbose = old_verbose
+
+        ops = list(circuit.all_operations())
+        depth = len(circuit)
+        n_gates = len(ops)
+        n_two_qubit = sum(1 for op in ops if len(op.qubits) == 2)
+
+        print(f"Circuit depth (moments): {depth}")
+        print(f"Total gates: {n_gates}")
+        print(f"2-qubit gates: {n_two_qubit}")
+        return depth, n_gates, n_two_qubit
+
     def draw_channel(self, coupling_geometry: dict, coupling_ops: dict = None, params: dict = None, save: str = None):
         """Draw the cooling channel circuit. Pass save='filename.svg' to save.
 
@@ -177,5 +207,3 @@ class Protocol(ABC):
         if x is None:
             raise KeyError(f"Missing required parameter {key!r}")
         return x
-
-

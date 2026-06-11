@@ -245,6 +245,6 @@ def ThermalEnergy(model, beta=None, k=10, **spec_kwargs):
     energies = ModelSpec(model, **spec_kwargs)
     if beta is None:
         return energies[:k]
-    weights = np.exp(-beta * energies)
+    weights = np.exp(-beta * (energies - energies.min()))
     weights /= weights.sum()
     return energies[:k], np.dot(energies, weights)

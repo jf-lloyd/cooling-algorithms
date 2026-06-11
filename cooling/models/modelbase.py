@@ -25,7 +25,8 @@ class Model(ABC):
         model.hamiltonian            : full Hamiltonian as cirq.PauliSum
         model.hamiltonian_components : dict of commuting pieces {op_str: cirq.PauliSum}
         model.coupling_lists         : coupling data to define Hamiltonian, gates
-        model.system_layer           : list of Cirq gates for one system evolution step
+        model.system_layer           : first-order list of Cirq gates for one system evolution step
+        model.system_layer_o2        : second-order symmetric system gate skeleton, built lazily
     """
 
     # Maps operator strings to Cirq gate constructors.
@@ -62,12 +63,26 @@ class Model(ABC):
                 raise ValueError(f"Unknown parameter(s) {unknown}. Accepted: {self._ACCEPTED_PARAMS}")
 
         self._coupling_lists = self.build_coupling_lists()
-        self._system_layer = self.build_system_layer()
+        self._system_layer = self.build_system_layer(order=1)
+        self._system_layer_o2 = None
         self.hamiltonian, self.hamiltonian_components = self.build_hamiltonian()
 
     @property
     def system_layer(self):
         return self._system_layer
+
+    @property
+    def system_layer_o2(self):
+        if self._system_layer_o2 is None:
+            self._system_layer_o2 = self.build_system_layer(order=2)
+        return self._system_layer_o2
+
+    def get_system_layer(self, order: int = 1) -> list:
+        if order == 1:
+            return self.system_layer
+        if order == 2:
+            return self.system_layer_o2
+        raise ValueError(f"System Trotter order must be 1 or 2, got {order!r}.")
 
     @property
     def coupling_lists(self):
@@ -99,30 +114,47 @@ class Model(ABC):
         """
         pass
 
-    def build_system_layer(self) -> list:
+    def build_system_layer(self, order: int = 1) -> list:
         """
         Build Cirq gate list from coupling_lists using _GATE_MAP.
         Two-site gates are applied layer-by-layer via bond_colouring().
+        order=2 returns a symmetric second-order skeleton;
         Override for non-standard gate sets (e.g. Heisenberg gates).
         """
+        if order not in (1, 2):
+            raise ValueError(f"System Trotter order must be 1 or 2, got {order!r}.")
+
         cl = self._coupling_lists
         qubits = self._device.system_qubits
-        gates = []
+        groups = []
 
         for op_str, terms in cl.items():
             if len(op_str) == 2:  # two-site
                 bond_strength = {(s, t): J for J, s, t in terms}
                 for layer in self._lattice.bond_colouring():
+                    group = []
                     for s, t in layer:
                         J = bond_strength.get((s, t), 0.)
                         if J != 0.:
-                            gates.append(self._GATE_MAP[op_str](J)(qubits[s], qubits[t]))
+                            group.append(self._GATE_MAP[op_str](J)(qubits[s], qubits[t]))
+                    if group:
+                        groups.append(group)
             else:  # one-site
+                group = []
                 for strength, s in terms:
                     if strength != 0.:
-                        gates.append(self._GATE_MAP[op_str](strength)(qubits[s]))
+                        group.append(self._GATE_MAP[op_str](strength)(qubits[s]))
+                if group:
+                    groups.append(group)
 
-        return gates
+        if order == 1 or len(groups) <= 1:
+            return [gate for group in groups for gate in group]
+
+        return (
+            [gate**0.5 for group in groups[:-1] for gate in group]
+            + list(groups[-1])
+            + [gate**0.5 for group in reversed(groups[:-1]) for gate in group]
+        )
 
     def build_hamiltonian(self) -> tuple:
         """
@@ -158,6 +190,8 @@ class Model(ABC):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        if '_system_layer_o2' not in self.__dict__:
+            self._system_layer_o2 = None
         self.hamiltonian, self.hamiltonian_components = self.build_hamiltonian()
 
     def draw_model(self):

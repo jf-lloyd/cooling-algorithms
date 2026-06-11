@@ -15,10 +15,17 @@ class DetailedBalanceProtocol(Protocol):
     The channel is returned as a FrozenCircuit for a given Device, Model, coupling
     geometry, coupling operators and parameters (see channel() for details).
 
-    Supported system-bath coupling gates: 'XX', 'YX', 'ZX', 'iSWAP'.
+    Supported system-bath coupling gates: 'XX', 'YX', 'ZX'.
+    Note iSWAP gate is not compatible with detailed balance (non-hermitian sigma^-) so we exclude it.
     """
 
-    def __init__(self, device:"CoolingDevice", model:"Model", params:dict=None, noise_model:"cirq.NoiseModel|None"=None, function="gaussian", trotter_order=1):
+
+    _COUPLING_GATE_MAP = {k: v for k, v in Protocol._COUPLING_GATE_MAP.items() if k != 'iSWAP'}
+
+    def __init__(self, device:"CoolingDevice", model:"Model", params:dict=None,
+                 noise_model:"cirq.NoiseModel|None"=None, function="gaussian",
+                 trotter_order=1, merge_single_qubit_gates: bool = True,
+                 drop_negligible_operations: bool = True, verbose: bool = False):
 
         super().__init__(device, model, params, noise_model)
 
@@ -33,6 +40,9 @@ class DetailedBalanceProtocol(Protocol):
         if trotter_order not in (1, 2):
             raise ValueError(f"trotter_order must be 1 or 2, got {trotter_order!r}.")
         self.trotter_order = trotter_order
+        self.merge_single_qubit_gates = merge_single_qubit_gates
+        self.drop_negligible_operations = drop_negligible_operations
+        self.verbose = verbose
 
     @property
     def name(self):
@@ -97,7 +107,7 @@ class DetailedBalanceProtocol(Protocol):
     def _get_coupling_layer(self, coupling_geometry:dict, coupling_ops:dict, theta:float):
         """
         Coupling gates for all system-bath pairs.
-        coupling_ops : {bath_idx: op_string} — 'X', 'Y', 'Z', 'iSWAP' per bath qubit.
+        coupling_ops : {bath_idx: op_string} — 'X', 'Y', 'Z' per bath qubit.
         exponent = 2*theta/π so that gate**delta**f[j] → exp(-i·theta·delta·f[j]·OP).
         """
         S  = self.device.system_qubits
@@ -105,14 +115,18 @@ class DetailedBalanceProtocol(Protocol):
         sb = self.coupling_gates(coupling_ops)
         return [sb[bi](exponent=2 / np.pi * theta)(S[si], B[bi]) for bi, si in coupling_geometry.items()]
 
+    @staticmethod
+    def _gate_count(circuit: cirq.Circuit) -> int:
+        return sum(1 for _ in circuit.all_operations())
+
     # ── Main channel builder ──────────────────────────────────────────────────
 
     def channel(self, coupling_geometry:dict, coupling_ops:dict, params:dict=None) -> cirq.FrozenCircuit:
         """
-        DetailedBalanceProtocol channel. Supported coupling gates (SB) 'XX', 'YX', 'ZX', 'iSWAP'
+        DetailedBalanceProtocol channel. Supported coupling gates (SB) 'XX', 'YX', 'ZX'
 
         coupling_geometry : dict {bath_idx: sys_idx}
-        coupling_ops      : dict {bath_idx: op_string}, op_string in {'X', 'Y', 'Z', 'iSWAP'}
+        coupling_ops      : dict {bath_idx: op_string}, op_string in {'X', 'Y', 'Z'}
         params:
             Required (structural — set circuit depth, must be real):
                 beta   : float — inverse target temperature
@@ -149,7 +163,7 @@ class DetailedBalanceProtocol(Protocol):
         cycle = cirq.Circuit()
 
         if self.trotter_order == 1:
-            sys_ops  = [u**delta for u in self.model.system_layer]
+            sys_ops  = [u**delta for u in self.model.get_system_layer(order=1)]
             if self.function == "mcp":
                 bath_ops = list(self._get_bath_layer(h))
             else:
@@ -161,8 +175,9 @@ class DetailedBalanceProtocol(Protocol):
                 cycle.append(u**filter_f[j] for u in c_ops)
 
         else:  # trotter_order == 2: Strang split with merged half-steps
-            sys_full = [u**delta for u in self.model.system_layer]
-            sys_half = [u**(delta / 2) for u in self.model.system_layer]
+            sys_layer = self.model.get_system_layer(order=2)
+            sys_full = [u**delta for u in sys_layer]
+            sys_half = [u**(delta / 2) for u in sys_layer]
             if self.function == "mcp":
                 bath_half = [u**0.5 for u in self._get_bath_layer(h)]
             else:
@@ -178,6 +193,18 @@ class DetailedBalanceProtocol(Protocol):
 
         cycle.append(reset_layer)
 
+        if self.merge_single_qubit_gates:
+            n_before = self._gate_count(cycle)
+            cycle = cirq.merge_single_qubit_gates_to_phxz(cycle)
+            n_after = self._gate_count(cycle)
+            if self.verbose:
+                print(f"single gate merging -- removed {n_before - n_after} gates")
+        if self.drop_negligible_operations:
+            n_before = self._gate_count(cycle)
+            cycle = cirq.drop_negligible_operations(cycle)
+            n_after = self._gate_count(cycle)
+            if self.verbose:
+                print(f"drop negligible operations -- removed {n_before - n_after} gates")
         cycle = self.apply_noise(cycle)
 
         return cirq.FrozenCircuit(cycle)

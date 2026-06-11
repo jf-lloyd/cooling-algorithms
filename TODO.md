@@ -7,9 +7,13 @@
 - Add `name` to Protocol base class
 - Add tests
 - Complete example notebook
-- Cluster setup for `run_parallel` (SLURM array job pattern)
+- ~~Cluster setup for `run_parallel` (SLURM array job pattern)~~ — done, see
+  `google/scripts/run_*.sh` and `QuEra/scripts/run_xy_*.sh`
 - Profiling scripts: clean up and document in `claudespace/`
-- **[HIGH PRIORITY]** Gate-based noise model — implement `NoiseModel` via `cirq_google.NoiseModelFromNoiseProperties` or manual Kraus channels; integrate with `cirq.Simulator(noise=...)`
+- ~~**[HIGH PRIORITY]** Gate-based noise model~~ — done via
+  `cooling/noise/basic.py` (`BasicNoiseModel`, commit 7606287)
+- Update `QuEra/scripts/job1_heis_noiseless.py` — still uses deprecated
+  `gamma=` Protocol kwarg, replace with `noise_model=`
 - Short depth initial state preparation
 - Benchmark Kagome lattice cooling (see Halimeh et al. https://arxiv.org/abs/2605.26245)
 - GPU measurement: use qsim `simulate_expectation_values()` at measurement steps
