@@ -74,11 +74,17 @@ class Lattice(ABC):
         return tuple(gs), tuple(gt)
 
     def nearest_neighbour_pairs(self):
-        """Return undirected neighbour pairs (s, t) with s < t."""
+        """Return undirected neighbour pairs (s, t) with s < t, each bond listed once.
+
+        Some lattices (e.g. a 2-site PBC chain) yield the same neighbour twice
+        from nearest_neighbours(s) since the "+1" and "-1" directions coincide;
+        dedupe here so each physical bond is counted once in the Hamiltonian."""
         pairs = []
+        seen = set()
         for s in range(self.Ns):
             for t in self.nearest_neighbours(s):
-                if s < t:
+                if s < t and (s, t) not in seen:
+                    seen.add((s, t))
                     pairs.append((s, t))
         return pairs
 

@@ -24,6 +24,9 @@ class Randomized(Schedule):
     ----------
     protocol          : Protocol
     coupling_geometry : dict {bath_idx: sys_idx} or None. Fixed geometry if provided; random per circuit if None.
+                        If None and Nb > Ns, bath qubit i is fixed to system qubit i for i < Ns
+                        (one dedicated bath per system qubit), and only the remaining Nb - Ns bath
+                        qubits are given a random assignment to system qubits (see build_cache).
     coupling_ops      : dict {bath_idx: op_str} or None. Fixed coupling ops if provided; random per circuit if None.
     allowed_ops       : list [op_str] or None. Draw from a subset of allowed coupling operators if provided;
                         defaults to all ops supported by the protocol.
@@ -81,13 +84,34 @@ class Randomized(Schedule):
 
         For n_possible < 1000: enumerates all configs and samples without replacement.
         Otherwise: frozenset rejection sampling (collision rate negligible for n_cache << n_possible).
+
+        Random geometry (coupling_geometry=None):
+            If Nb <= Ns, geometries are random Nb-subsets of system qubits
+            (combinations(range(Ns), Nb)).
+            If Nb > Ns, bath qubit i is fixed to system qubit i for i < Ns
+            (one dedicated bath per system qubit), and only the remaining
+            Nb - Ns bath qubits are given a random (without-replacement)
+            assignment to system qubits.
         """
         Nb, Ns = self.protocol.device.Nb, self.protocol.device.Ns
         rng = self._build_rng
 
-        geom_options = math.comb(Ns, Nb) if self.coupling_geometry is None else 1
-        ops_options  = len(self.allowed_ops) ** Nb if self.coupling_ops is None else 1
-        n_possible   = geom_options * ops_options
+        random_geometry = self.coupling_geometry is None
+        hybrid_geometry = random_geometry and Nb > Ns
+        n_rand_geom = (Nb - Ns) if hybrid_geometry else Nb
+
+        if hybrid_geometry:
+            fixed_geom   = {bi: bi for bi in range(Ns)}
+            geom_options = math.comb(Ns, n_rand_geom)
+        elif random_geometry:
+            fixed_geom   = {}
+            geom_options = math.comb(Ns, Nb)
+        else:
+            fixed_geom   = {}
+            geom_options = 1
+
+        ops_options = len(self.allowed_ops) ** Nb if self.coupling_ops is None else 1
+        n_possible  = geom_options * ops_options
 
         effective_n = min(self.n_cache, n_possible)
         if _warn and effective_n < self.n_cache:
@@ -98,9 +122,14 @@ class Randomized(Schedule):
 
         if n_possible < 1000:
             # Enumerate all configs, sample without replacement
-            geoms = list(combinations(range(Ns), Nb)) \
-                    if self.coupling_geometry is None \
-                    else [tuple(self.coupling_geometry[bi] for bi in range(Nb))]
+            if hybrid_geometry:
+                extra_geoms = list(combinations(range(Ns), n_rand_geom))
+                fixed_tuple = tuple(fixed_geom[bi] for bi in range(Ns))
+                geoms = [fixed_tuple + extra for extra in extra_geoms]
+            elif random_geometry:
+                geoms = list(combinations(range(Ns), Nb))
+            else:
+                geoms = [tuple(self.coupling_geometry[bi] for bi in range(Nb))]
             ops   = list(iproduct(self.allowed_ops, repeat=Nb)) \
                     if self.coupling_ops is None \
                     else [tuple(self.coupling_ops[bi] for bi in range(Nb))]
@@ -119,7 +148,11 @@ class Randomized(Schedule):
                       f"Consider reducing n_cache.")
             seen = set()
             while len(self._cache) < effective_n:
-                if self.coupling_geometry is None:
+                if hybrid_geometry:
+                    extra_indices = sorted(rng.choice(Ns, size=n_rand_geom, replace=False))
+                    geometry = dict(fixed_geom)
+                    geometry.update({bi: int(si) for bi, si in zip(range(Ns, Nb), extra_indices)})
+                elif random_geometry:
                     sys_indices = sorted(rng.choice(Ns, size=Nb, replace=False))
                     geometry    = {bi: int(si) for bi, si in enumerate(sys_indices)}
                 else:
