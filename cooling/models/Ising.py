@@ -1,5 +1,5 @@
 """
-Transverse-field Ising model with optional longitudinal field.
+Transverse-field (antiferromagnetic) Ising model with optional longitudinal field.
     H = J sum_{<ij>} X_i X_j  -  g sum_i Z_i  -  gx sum_i X_i
 
 Created by Jerome Lloyd on 3rd June 2026
