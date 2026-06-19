@@ -1,24 +1,19 @@
 """
-Detailed balance protocol -- choice between different filter functions
-Created by Jerome Lloyd on 4th June 2026.
+Ground state protocol -- choice between different filter functions
+Created by Jerome Lloyd on 19th June 2026.
 """
 
 import numpy as np
 import cirq
 from .protocolbase import Protocol
 
-class DetailedBalanceProtocol(Protocol):
+class GroundStateProtocol(Protocol):
 
     """
-    Detailed balance protocol, using either gaussian filter (arxiv/2506.21318) or
-    "modulated coupling protocol" (step-like) filter (arxiv/2404.12175).
-    The channel is returned as a FrozenCircuit for a given Device, Model, coupling
-    geometry, coupling operators and parameters (see channel() for details).
-
+    Ground state cooling protocol. Targets the ground state, with different filter functions.
+    Currently supported filter functions: 'gaussian', 'constant', 'super_gaussian'.
     Supported system-bath coupling gates: 'XX', 'YX', 'ZX'.
-    Note iSWAP gate is not compatible with detailed balance (non-hermitian sigma^-) so we exclude it.
     """
-
 
     _COUPLING_GATE_MAP = {k: v for k, v in Protocol._COUPLING_GATE_MAP.items() if k != 'iSWAP'}
 
@@ -32,10 +27,12 @@ class DetailedBalanceProtocol(Protocol):
         self.function = function
         if function == "gaussian":
             self.filter_function = self.gaussian_filter_function
-        elif function == "mcp":
-            self.filter_function = self.mcp_filter_function
+        elif function == "constant":
+            self.filter_function = self.constant_filter_function
+        elif function == "super_gaussian":
+            self.filter_function = self.super_gaussian_filter_function
         else:
-            raise ValueError(f"Unknown filter function {function!r}. Choose 'gaussian' or 'mcp'.")
+            raise ValueError(f"Unknown filter function {function!r}. Choose 'gaussian', 'constant', or 'super_gaussian'.")
 
         if trotter_order not in (1, 2):
             raise ValueError(f"trotter_order must be 1 or 2, got {trotter_order!r}.")
@@ -48,8 +45,7 @@ class DetailedBalanceProtocol(Protocol):
     def name(self):
         p = self.params
         parts = []
-        for key, fmt in [('beta', 'b{:.2f}'), ('delta', 'd{:.4f}'),
-                         ('h', 'h{:.2f}'), ('theta', 'th{:.3f}')]:
+        for key, fmt in [('delta', 'd{:.4f}'), ('h', 'h{:.2f}'), ('sigma', 's{:.3f}'), ('theta', 'th{:.3f}')]:
             if key in p:
                 parts.append(fmt.format(p[key]))
         parts.append(self.function)
@@ -59,51 +55,56 @@ class DetailedBalanceProtocol(Protocol):
 
     @property
     def print_channel_description(self):
-        """Print the channel description (inc parameters required by channel) for this protocol."""
         print(f"Using filter function: {self.function}")
         print(self.channel.__doc__)
 
     # ── Filter functions ──────────────────────────────────────────────────────
+    # All filters share the signature (sigma, delta, NT) and return a normalised
+    # array f of length 2*NT+1.  sigma is the time-domain width (continuous time
+    # units: the filter decays / is truncated over |δt| ~ sigma).
 
-    def gaussian_filter_function(self, beta:float, delta:float, h:float, NT:int):
-        """Gaussian detailed balance filter — width ~ sqrt(beta/h)."""
-        a  = delta * np.sqrt(abs(4 * h / beta))
-        MT = max(NT, int(NT / a))
-        f  = np.array([np.exp(-a**2 * t**2 / 2) for t in np.arange(-MT, MT + 1)])
+    def gaussian_filter_function(self, sigma: float, delta: float, NT: int):
+        """Gaussian filter — f[t] = exp(-(δt)²/(2σ²))."""
+        t = np.arange(-NT, NT + 1)
+        f = np.exp(-(t)**2 / (2 * sigma**2))
         f /= delta * np.sum(np.abs(f))
         return f
 
-    def mcp_filter_function(self, beta:float, delta:float, h:float, NT:int):
-        """Modulated coupling pulse (sinc/sinh step-function filter)."""
-        if not np.isclose(h, np.pi / 2):
-            raise ValueError(f"mcp requires h=π/2, got h={h:.4f}")
-        MT = max(NT, int(NT * beta / delta))
-        f  = []
-        for t in np.arange(-MT, MT + 1):
-            if t == 0:
-                f.append(0.5)
-            else:
-                f.append(np.sin(np.pi * t / 2) / np.sinh(delta * np.pi * t / beta) * delta / beta)
-        f  = np.array(f)
+    def constant_filter_function(self, sigma: float, delta: float, NT: int):
+        """Constant (flat) filter — f[t] = 1."""
+        f = np.ones(2 * NT + 1)
         f /= delta * np.sum(np.abs(f))
         return f
 
-    def fourier_filter_function(self, omega:float, flist, h, delta):
+    def super_gaussian_filter_function(self, sigma: float, delta: float, NT: int, n: int = 2):
+        """Freq-domain super-Gaussian: f̃(Ω) ∝ exp(-(|Ω|·sigma)^{2n}).
+        n=1: Gaussian; n=2: flat-topped; larger n → near-rectangular.
+        Time tails decay as exp(-c|t|^{2n/(2n-1)}), enabling accurate truncation at small NT.
+        n passed via params as 'SG_N' (default 2)."""
+        tlist     = np.arange(-NT, NT + 1)
+        tau       = tlist
+        N_fft     = max(4096, 32 * (2 * NT + 1))
+        omega_max = 6.0 / sigma
+        omega     = np.linspace(-omega_max, omega_max, N_fft)
+        dw        = omega[1] - omega[0]
+        f_tilde   = np.exp(-(np.abs(omega) * sigma) ** (2 * n))
+        f         = np.real(np.exp(1j * np.outer(tau, omega)) @ f_tilde) * dw / (2 * np.pi)
+        f        /= delta * np.sum(np.abs(f))
+        return f
+
+    def fourier_filter_function(self, omega: float, flist, h: float, delta: float):
         """Fourier-transformed filter function."""
         MT    = len(flist) // 2
         tlist = np.arange(-MT, MT + 1)
-        if self.function == "mcp": # don't multiply h by delta
-            return np.sum([flist[t] * np.exp(1j * (h - omega * delta ) * tlist[t]) for t in range(len(tlist))])
-        else:
-            return np.sum([flist[t] * np.exp(1j * (h - omega) * delta * tlist[t]) for t in range(len(tlist))])
+        return np.sum([flist[t] * np.exp(1j * (h - omega) * delta * tlist[t]) for t in range(len(tlist))])
 
     # ── Circuit building helpers ──────────────────────────────────────────────
 
-    def _get_bath_layer(self, h:float):
+    def _get_bath_layer(self, h: float):
         """Uniform Zeeman splitting on bath qubits. cirq: rz(-h) = exp(ih/2 Z)."""
         return [cirq.rz(-h)(b) for b in self.device.bath_qubits]
 
-    def _get_coupling_layer(self, coupling_geometry:dict, coupling_ops:dict, theta:float):
+    def _get_coupling_layer(self, coupling_geometry: dict, coupling_ops: dict, theta: float):
         """
         Coupling gates for all system-bath pairs.
         coupling_ops : {bath_idx: op_string} — 'X', 'Y', 'Z' per bath qubit.
@@ -120,20 +121,21 @@ class DetailedBalanceProtocol(Protocol):
 
     # ── Main channel builder ──────────────────────────────────────────────────
 
-    def channel(self, coupling_geometry:dict, coupling_ops:dict, params:dict=None, compile:bool=True) -> cirq.FrozenCircuit:
+    def channel(self, coupling_geometry: dict, coupling_ops: dict, params: dict = None, compile: bool = True) -> cirq.FrozenCircuit:
         """
-        DetailedBalanceProtocol channel. Supported coupling gates (SB) 'XX', 'YX', 'ZX'
+        GroundStateProtocol channel. Supported coupling gates (SB): 'XX', 'YX', 'ZX'
 
         coupling_geometry : dict {bath_idx: sys_idx}
         coupling_ops      : dict {bath_idx: op_string}, op_string in {'X', 'Y', 'Z'}
         params:
-            Required (structural — set circuit depth, must be real):
-                beta   : float — inverse target temperature
+            Required:
                 delta  : float — Trotter angle
                 h      : float — bath splitting
+                sigma  : float — filter time-domain width (continuous time)
                 theta  : float — coupling strength
             Optional:
-                NT     : int (default 5) — filter truncation / circuit depth
+                NT     : int (default 5) — filter half-length (circuit depth ~ 2*NT+1 steps)
+                SG_N   : int (default 2, super_gaussian only) — super-Gaussian order n
 
         trotter_order (set in __init__, default 1):
             1 — first-order (Lie-Trotter) split: sys(δ) -> bath(δ) -> coupling(δ·f[j])
@@ -141,33 +143,30 @@ class DetailedBalanceProtocol(Protocol):
             2 — second-order (Strang) split with merged half-steps ("leapfrog"):
                 sys(δ/2) -> [bath(δ/2) -> coupling(δ·f[j]) -> bath(δ/2) -> sys(δ)]*
                 -> ... -> sys(δ/2), error O(δ²) global, ~4/3x gates per step.
-
-        Use Protocol.draw_channel(coupling_geometry, coupling_ops, params) to visualise.
         """
         self.validate_geometry(coupling_geometry, coupling_ops)
 
         params = {**self.params, **(params or {})}
-        beta  = self.require_real(params, "beta")
         delta = self.require_real(params, "delta")
         h     = self.require_real(params, "h")
+        sigma = self.require_real(params, "sigma")
         NT    = self.require_int(params,  "NT", default=5)
         theta = self.get_param(params, "theta")
 
-        filter_f = self.filter_function(beta, delta, h, NT)
+        filter_kwargs = {}
+        if self.function == "super_gaussian":
+            filter_kwargs['n'] = self.require_int(params, "SG_N", default=2)
+        filter_f = self.filter_function(sigma, delta, NT, **filter_kwargs)
         MT       = len(filter_f) // 2
 
-        c_ops = [u**delta for u in self._get_coupling_layer(coupling_geometry, coupling_ops, theta)]
+        c_ops       = [u**delta for u in self._get_coupling_layer(coupling_geometry, coupling_ops, theta)]
         reset_layer = self._reset_layer
 
         cycle = cirq.Circuit()
 
         if self.trotter_order == 1:
             sys_ops  = [u**delta for u in self.model.get_system_layer(order=1)]
-            if self.function == "mcp":
-                bath_ops = list(self._get_bath_layer(h))
-            else:
-                bath_ops = [u**delta for u in self._get_bath_layer(h)]
-
+            bath_ops = [u**delta for u in self._get_bath_layer(h)]
             for j in range(2 * MT + 1):
                 cycle.append(sys_ops)
                 cycle.append(bath_ops)
@@ -175,12 +174,9 @@ class DetailedBalanceProtocol(Protocol):
 
         else:  # trotter_order == 2: Strang split with merged half-steps
             sys_layer = self.model.get_system_layer(order=2)
-            sys_full = [u**delta for u in sys_layer]
-            sys_half = [u**(delta / 2) for u in sys_layer]
-            if self.function == "mcp":
-                bath_half = [u**0.5 for u in self._get_bath_layer(h)]
-            else:
-                bath_half = [u**(delta / 2) for u in self._get_bath_layer(h)]
+            sys_full  = [u**delta       for u in sys_layer]
+            sys_half  = [u**(delta / 2) for u in sys_layer]
+            bath_half = [u**(delta / 2) for u in self._get_bath_layer(h)]
 
             N = 2 * MT + 1
             cycle.append(sys_half)
