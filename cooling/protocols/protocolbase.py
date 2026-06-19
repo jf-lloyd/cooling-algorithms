@@ -8,6 +8,27 @@ Created by Jerome Lloyd on 4th June 2026.
 
 from abc import ABC, abstractmethod
 import cirq
+
+
+class _NamedGate(cirq.Gate):
+    """Placeholder gate that displays a fixed label — used to hide rotation angles in diagrams."""
+    def __init__(self, label: str, n_qubits: int):
+        self._label = label
+        self._n = n_qubits
+    def _num_qubits_(self):
+        return self._n
+    def _circuit_diagram_info_(self, args):
+        return [self._label] * self._n
+
+
+_GATE_LABELS = {
+    cirq.PhasedXZGate:  'PhXZ',
+    cirq.PhasedXPowGate: 'PhX',
+    cirq.CZPowGate:     'CZ',
+    cirq.ZPowGate:      'Z',
+    cirq.XPowGate:      'X',
+    cirq.YPowGate:      'Y',
+}
 import numbers
 from ..gates import YXPowGate, ZXPowGate
 
@@ -103,7 +124,7 @@ class Protocol(ABC):
             )
 
     @abstractmethod
-    def channel(self, coupling_geometry: dict, coupling_ops: dict, params: dict) -> cirq.FrozenCircuit:
+    def channel(self, coupling_geometry: dict, coupling_ops: dict, params: dict, compile: bool = True) -> cirq.FrozenCircuit:
         """
         Build and return one cooling-cycle. Implement in subclass.
         """
@@ -114,7 +135,7 @@ class Protocol(ABC):
         """Print the channel description (inc parameters required by channel) for this protocol."""
         print(self.channel.__doc__)
 
-    def channel_depth(self, coupling_geometry: dict = None, coupling_ops: dict = None, params: dict = None) -> tuple[int, int, int]:
+    def channel_depth(self, coupling_geometry: dict = None, coupling_ops: dict = None, params: dict = None, compile: bool = True) -> tuple[int, int, int]:
         """Print and return channel size: moments, total gates, and 2-qubit gates.
 
         coupling_geometry defaults to bath i coupled to system i.
@@ -129,7 +150,7 @@ class Protocol(ABC):
         if old_verbose is not None:
             self.verbose = True
         try:
-            circuit = cirq.Circuit(self.channel(coupling_geometry, coupling_ops, params))
+            circuit = cirq.Circuit(self.channel(coupling_geometry, coupling_ops, params, compile=compile))
         finally:
             if old_verbose is not None:
                 self.verbose = old_verbose
@@ -144,15 +165,25 @@ class Protocol(ABC):
         print(f"2-qubit gates: {n_two_qubit}")
         return depth, n_gates, n_two_qubit
 
-    def draw_channel(self, coupling_geometry: dict, coupling_ops: dict = None, params: dict = None, save: str = None):
+    def draw_channel(self, coupling_geometry: dict, coupling_ops: dict = None, params: dict = None, save: str = None, compile: bool = True, hide_angles: bool = False):
         """Draw the cooling channel circuit. Pass save='filename.svg' to save.
 
         coupling_ops defaults to 'X' on every bath qubit in coupling_geometry.
+        hide_angles=True replaces parameterised gates with simplified labels in the diagram.
         """
         if coupling_ops is None:
             coupling_ops = {bi: 'X' for bi in coupling_geometry}
-        C = cirq.Circuit(self.channel(coupling_geometry, coupling_ops, params))
+        C = cirq.Circuit(self.channel(coupling_geometry, coupling_ops, params, compile=compile))
         print(f"Circuit: {len(C) - 1} moments + reset")
+        if hide_angles:
+            def _simplify(op):
+                if isinstance(op.gate, (cirq.ResetChannel, cirq.MeasurementGate)):
+                    return op
+                for gate_type, label in _GATE_LABELS.items():
+                    if isinstance(op.gate, gate_type):
+                        return _NamedGate(label, len(op.qubits)).on(*op.qubits)
+                return _NamedGate(type(op.gate).__name__, len(op.qubits)).on(*op.qubits)
+            C = cirq.Circuit(cirq.Moment(_simplify(op) for op in m) for m in C)
         try:
             from IPython.display import display
             from cirq.contrib.svg import SVGCircuit

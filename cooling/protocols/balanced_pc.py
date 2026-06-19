@@ -121,7 +121,7 @@ class DetailedBalanceProtocol(Protocol):
 
     # ── Main channel builder ──────────────────────────────────────────────────
 
-    def channel(self, coupling_geometry:dict, coupling_ops:dict, params:dict=None) -> cirq.FrozenCircuit:
+    def channel(self, coupling_geometry:dict, coupling_ops:dict, params:dict=None, compile:bool=True) -> cirq.FrozenCircuit:
         """
         DetailedBalanceProtocol channel. Supported coupling gates (SB) 'XX', 'YX', 'ZX'
 
@@ -205,6 +205,16 @@ class DetailedBalanceProtocol(Protocol):
             n_after = self._gate_count(cycle)
             if self.verbose:
                 print(f"drop negligible operations -- removed {n_before - n_after} gates")
+        if compile:
+            gateset = cirq.CZTargetGateset(allow_partial_czs=True)
+            cycle = cirq.optimize_for_target_gateset(cirq.Circuit(cycle), gateset=gateset)
+            n_before = self._gate_count(cycle)
+            cycle = cirq.eject_phased_paulis(cycle)
+            cycle = cirq.eject_z(cycle)
+            n_after = self._gate_count(cycle)
+            if self.verbose:
+                print(f"ejecting phased gates -- removed {n_before - n_after} gates")
+            cycle = cirq.align_left(cycle)
         cycle = self.apply_noise(cycle)
 
         return cirq.FrozenCircuit(cycle)

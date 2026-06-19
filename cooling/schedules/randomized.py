@@ -39,7 +39,7 @@ class Randomized(Schedule):
     def __init__(self, protocol, coupling_geometry=None, coupling_ops=None,
                  allowed_ops=None, n_cache: int = 50, resample=None,
                  resample_trajectories: bool = False,
-                 parameterized: bool = False, seed=None):
+                 parameterized: bool = False, seed=None, compile: bool = True):
 
         super().__init__(protocol)
         self.coupling_geometry = coupling_geometry
@@ -67,8 +67,9 @@ class Randomized(Schedule):
                 )
             self.allowed_ops = list(allowed_ops)
 
-        rng        = np.random.default_rng(seed)
-        self._rng  = np.random.default_rng(rng.integers(2**31))
+        self.compile    = compile
+        rng             = np.random.default_rng(seed)
+        self._rng       = np.random.default_rng(rng.integers(2**31))
         self._build_rng = rng
 
         self.build_cache()
@@ -138,7 +139,7 @@ class Randomized(Schedule):
             for idx in selected_idx:
                 geom_tuple, ops_tuple = all_configs[idx]
                 self._cache.append(self.protocol.channel(
-                    dict(enumerate(geom_tuple)), dict(enumerate(ops_tuple))))
+                    dict(enumerate(geom_tuple)), dict(enumerate(ops_tuple)), compile=self.compile))
         else:
             # Rejection sampling — collisions rare when n_cache << n_possible
             expected_extra = effective_n ** 2 / (2 * n_possible)
@@ -168,7 +169,7 @@ class Randomized(Schedule):
                 ))
                 if key not in seen:
                     seen.add(key)
-                    self._cache.append(self.protocol.channel(geometry, coupling_ops))
+                    self._cache.append(self.protocol.channel(geometry, coupling_ops, compile=self.compile))
 
         if not self.parameterized:
             # Circuits are concrete (no sympy): tell cirq/qsim so they skip the
