@@ -117,7 +117,7 @@ def gate_noise_budget(L: int, NB: int, J: float, g: float, beta: float,
                       p1: float, p2: float, NT=None, h_override=None) -> dict:
     """Analytical primitive-gate and stochastic-fault counts for one reset.
     Mirrors ri_cycle_trajectory's window: with NT override, MT=max(NT,int(NT/(delta*a_true)));
-    h_override (e.g. the reference h=4) replaces the default max(2g,4J)."""
+    h_override (e.g. Jerome's h=4) replaces the default max(2g,4J)."""
     h = float(h_override) if h_override is not None else max(2 * g, 4 * J)
     a_true = math.sqrt(4.0 * h / max(beta, 1e-12))
     if NT is not None:
@@ -168,7 +168,7 @@ def build_sb_coupling(theta_ft: float):
 # ---------------- MPS helpers -------------------------------------------------------
 def make_initial_mps(L_sys: int, NB: int, dtype='complex128', rng=None, init='cold'):
     """Product-state init. 'cold' = |0..0> (low-entanglement, default, MPS-cheap).
-    'random' = random computational-basis bitstring per call (reference-style hot init,
+    'random' = random computational-basis bitstring per call (Jerome-style hot init,
     decorrelates trajectories). NOTE: cooling FROM a random bitstring builds volume-law
     entanglement transiently -> use a noise-matched cutoff (~1e-6) or the bond explodes."""
     n = L_sys + NB
@@ -287,6 +287,50 @@ def apply_system_strang(mps: qtn.MatrixProductState, system_sites, U_z_half, U_x
     apply_two_site_even_odd_sys(mps, U_xx, system_sites, chi, cutoff, rng, p2)
     apply_one_site_all_sys(mps, U_z_half, system_sites, chi, cutoff, rng, p1)
 
+# ---- Generic 1D spin model: system Hamiltonian terms + evolution -------------------
+def model_system_terms(model, J=1.0, g=1.0, gx=0.0, Jxx=None, Jyy=None, Jzz=None):
+    """H_sys = -Σ field - Σ coupling, returned as
+    (fields=[(coeff, P 2x2)], couplings=[(coeff, P_left 2x2, P_right 2x2)]).
+    ising: field -g Z (and -gx X), coupling -J XX.  xy: -Jxx XX -Jyy YY.
+    heisenberg: -Jxx XX -Jyy YY -Jzz ZZ.  (Jxx/Jyy/Jzz default to J.)"""
+    jx = J if Jxx is None else Jxx
+    jy = J if Jyy is None else Jyy
+    jz = J if Jzz is None else Jzz
+    if model == "ising":
+        fields = [(g, Z)] + ([(gx, X)] if gx else [])
+        couplings = [(J, X, X)]
+    elif model == "xy":
+        fields = []
+        couplings = [(jx, X, X), (jy, Y, Y)]
+    elif model == "heisenberg":
+        fields = []
+        couplings = [(jx, X, X), (jy, Y, Y), (jz, Z, Z)]
+    else:
+        raise ValueError(f"unknown model {model!r} (ising|xy|heisenberg)")
+    return fields, couplings
+
+def apply_sys_step_generic(mps, system_sites, fields, couplings, dur,
+                           chi, cutoff, rng: np.random.Generator, p1, p2):
+    """2nd-order Strang of H_sys over time `dur`: field(dur/2) - [symmetric couplings(dur)]
+    - field(dur/2). e^{-i H_sys dur} with H_sys = -Σ field - Σ coupling, so each factor is
+    e^{+i coeff·t·P}. For a single coupling (Ising) reduces to field(dur/2)-coupling(dur)-field(dur/2)."""
+    fhalf = [expm(+1j * c * (dur / 2.0) * P) for c, P in fields]
+    chalf = [expm(+1j * c * (dur / 2.0) * np.kron(Pl, Pr)) for c, Pl, Pr in couplings]
+    cfull = [expm(+1j * c * dur * np.kron(Pl, Pr)) for c, Pl, Pr in couplings]
+    for U in fhalf:
+        apply_one_site_all_sys(mps, U, system_sites, chi, cutoff, rng, p1)
+    n = len(couplings)
+    if n == 1:
+        apply_two_site_even_odd_sys(mps, cfull[0], system_sites, chi, cutoff, rng, p2)
+    elif n >= 2:
+        for U in chalf[:-1]:
+            apply_two_site_even_odd_sys(mps, U, system_sites, chi, cutoff, rng, p2)
+        apply_two_site_even_odd_sys(mps, cfull[-1], system_sites, chi, cutoff, rng, p2)
+        for U in reversed(chalf[:-1]):
+            apply_two_site_even_odd_sys(mps, U, system_sites, chi, cutoff, rng, p2)
+    for U in fhalf:
+        apply_one_site_all_sys(mps, U, system_sites, chi, cutoff, rng, p1)
+
 # ---- 1- and 2-site expectations from reduced RDMs (robust) ------------------------
 def _local_z_expectation(mps: qtn.MatrixProductState, idx: int,
                          max_bond=256, cutoff=1e-10) -> float:
@@ -333,29 +377,31 @@ def _two_site_expectation(mps: qtn.MatrixProductState, A: np.ndarray, i: int,
         AB = np.kron(A, B)
         return float(np.trace(red @ AB).real)
 
-def energy_from_mps(mps: qtn.MatrixProductState, system_sites, J: float, g: float,
+def energy_from_mps(mps: qtn.MatrixProductState, system_sites, fields, couplings,
                     max_bond=256, cutoff=1e-10) -> float:
-    """E = -J Σ⟨X_i X_{i+1}⟩ - g Σ⟨Z_i⟩ from current (system+bath) MPS over system sites."""
-    terms = {(site,): -g * Z for site in system_sites}
-    terms.update({
-        (left, right): -J * np.kron(X, X)
-        for left, right in zip(system_sites[:-1], system_sites[1:])
-    })
+    """E = <H_sys> = -Σ_field coeff Σ_i⟨P_i⟩ - Σ_coupling coeff Σ_i⟨P_i P_{i+1}⟩ (system sites).
+    fields=[(coeff,P)], couplings=[(coeff,P_left,P_right)] (same spec as model_system_terms)."""
+    terms = {}
+    for c, P in fields:
+        op = -c * P
+        for site in system_sites:
+            k = (site,); terms[k] = terms.get(k, np.zeros_like(op)) + op
+    for c, Pl, Pr in couplings:
+        op = -c * np.kron(Pl, Pr)
+        for left, right in zip(system_sites[:-1], system_sites[1:]):
+            k = (left, right); terms[k] = terms.get(k, np.zeros_like(op)) + op
     try:
-        energy = mps.compute_local_expectation(terms, method="envs")
-        return float(np.real(energy))
+        return float(np.real(mps.compute_local_expectation(terms, method="envs")))
     except Exception:
-        Ez = sum(
-            _local_z_expectation(mps, site, max_bond=max_bond, cutoff=cutoff)
-            for site in system_sites
-        )
-        Exx = sum(
-            _two_site_expectation(
-                mps, X, left, X, right, max_bond=max_bond, cutoff=cutoff
-            )
-            for left, right in zip(system_sites[:-1], system_sites[1:])
-        )
-        return -J * Exx - g * Ez
+        e = 0.0
+        for c, P in fields:
+            e += -c * sum(float(np.real(mps.local_expectation_exact(P, (site,))))
+                          for site in system_sites)
+        for c, Pl, Pr in couplings:
+            e += -c * sum(_two_site_expectation(mps, Pl, left, Pr, right,
+                                                max_bond=max_bond, cutoff=cutoff)
+                          for left, right in zip(system_sites[:-1], system_sites[1:]))
+        return float(e)
 
 # ---------------- System MPO (cache) -----------------------------------------------
 # SpinHam1D uses Sx=σx/2, Sz=σz/2; to get H=-J σxσx - g σz, use -4J for XX and -2g for Z
@@ -419,8 +465,10 @@ def ri_cycle_trajectory(mps: qtn.MatrixProductState, L: int, NB: int, J: float, 
                         trotter_order: int = 2, p1: float = 0.0, p2: float = 0.0,
                         p_reset: float = 0.0, system_sites=None, bath_sites=None,
                         site_ordering: str = "blocked",
-                        h_override=None, theta_override=None, NT=None):
+                        h_override=None, theta_override=None, NT=None,
+                        model="ising", mparams=None):
     """One repeated-interaction cycle with Gaussian filter, randomized geometry (one trajectory)."""
+    fields, couplings = model_system_terms(model, J=J, g=g, **(mparams or {}))
     if trotter_order not in (1, 2):
         raise ValueError(f"trotter_order must be 1 or 2, got {trotter_order}.")
     validate_probability("p1", p1)
@@ -434,7 +482,7 @@ def ri_cycle_trajectory(mps: qtn.MatrixProductState, L: int, NB: int, J: float, 
     h = float(h_override) if h_override is not None else max(2 * g, 4 * J)
     a_true = math.sqrt(4.0 * h / max(beta, 1e-12))
     if NT is not None:
-        # the reference window: a = delta*a_true (== his delta*sqrt(4h/beta)), MT = max(NT, int(NT/a))
+        # Jerome's window: a = delta*a_true (== his delta*sqrt(4h/beta)), MT = max(NT, int(NT/a))
         a_jer = delta * a_true
         MT = max(int(NT), int(int(NT) / a_jer)) if a_jer > 0 else int(NT)
     else:
@@ -457,11 +505,14 @@ def ri_cycle_trajectory(mps: qtn.MatrixProductState, L: int, NB: int, J: float, 
     peak_bond = int(mps.max_bond())
 
     if trotter_order == 1:
-        U1, U2 = build_system_unis(J, g, delta)
         Ub = build_bath_precession(h, delta)
+        f1 = [expm(+1j * c * delta * P) for c, P in fields]
+        c1 = [expm(+1j * c * delta * np.kron(Pl, Pr)) for c, Pl, Pr in couplings]
         for ft in f:
-            apply_one_site_all_sys(mps, U1, system_sites, chi, cutoff, rng, p1)
-            apply_two_site_even_odd_sys(mps, U2, system_sites, chi, cutoff, rng, p2)
+            for U in f1:
+                apply_one_site_all_sys(mps, U, system_sites, chi, cutoff, rng, p1)
+            for U in c1:
+                apply_two_site_even_odd_sys(mps, U, system_sites, chi, cutoff, rng, p2)
             apply_bath_precession(mps, Ub, bath_sites, chi, cutoff, rng, p1)
             for mu, i_sys in enumerate(sys_targets):
                 U_sb = build_sb_coupling(theta_ft=delta * theta * ft)
@@ -471,17 +522,19 @@ def ri_cycle_trajectory(mps: qtn.MatrixProductState, L: int, NB: int, J: float, 
                 )
             peak_bond = max(peak_bond, int(mps.max_bond()))
     else:
-        # Merged leapfrog:
-        # S(dt/2) [B(dt/2) C_j(dt) B(dt/2) S(dt)] ... S(dt/2).
-        # Each S duration is internally Z/2 - XX - Z/2.
+        # 2nd-order Strang: S(dt/2) [B(dt/2) C_j(dt) B(dt/2) S(dt)] ... S(dt/2).
         Ub_half = build_bath_precession(h, delta / 2.0)
-        U_z_quarter, _ = build_system_unis(J, g, delta / 4.0)
-        U_z_half, U_xx_half = build_system_unis(J, g, delta / 2.0)
-        _, U_xx_full = build_system_unis(J, g, delta)
-        apply_system_strang(
-            mps, system_sites, U_z_quarter, U_xx_half,
-            chi, cutoff, rng, p1, p2
-        )
+        if model == "ising":
+            # Ising keeps the validated leapfrog-merged step (Z/2 - XX - Z/2, 1q noise once).
+            def sys_step(dur):
+                Uz, _ = build_system_unis(J, g, dur / 2.0)
+                _, Uxx = build_system_unis(J, g, dur)
+                apply_system_strang(mps, system_sites, Uz, Uxx, chi, cutoff, rng, p1, p2)
+        else:
+            def sys_step(dur):
+                apply_sys_step_generic(mps, system_sites, fields, couplings, dur,
+                                       chi, cutoff, rng, p1, p2)
+        sys_step(delta / 2.0)
         for j, ft in enumerate(f):
             apply_bath_precession(mps, Ub_half, bath_sites, chi, cutoff, rng, p1)
             for mu, i_sys in enumerate(sys_targets):
@@ -491,16 +544,7 @@ def ri_cycle_trajectory(mps: qtn.MatrixProductState, L: int, NB: int, J: float, 
                     U_sb, chi, cutoff, rng, p2
                 )
             apply_bath_precession(mps, Ub_half, bath_sites, chi, cutoff, rng, p1)
-            if j == len(f) - 1:
-                apply_system_strang(
-                    mps, system_sites, U_z_quarter, U_xx_half,
-                    chi, cutoff, rng, p1, p2
-                )
-            else:
-                apply_system_strang(
-                    mps, system_sites, U_z_half, U_xx_full,
-                    chi, cutoff, rng, p1, p2
-                )
+            sys_step(delta / 2.0 if j == len(f) - 1 else delta)
             peak_bond = max(peak_bond, int(mps.max_bond()))
 
     # stochastic trace+reset of baths
@@ -518,6 +562,7 @@ def run_ri_tebd_energy_trajectories_mpi(L=6, J=1.0, g=1.0, beta=0.5, NB=3,
                                         p1=0.0, p2=0.0, p_reset=0.0,
                                         site_ordering="auto",
                                         h_override=None, theta_override=None, NT=None,
+                                        model="ising", mparams=None,
                                         init='random'):
     """
     MPI-parallel version: each rank simulates a disjoint subset of trajectories and
@@ -534,6 +579,7 @@ def run_ri_tebd_energy_trajectories_mpi(L=6, J=1.0, g=1.0, beta=0.5, NB=3,
               f"builds volume-law entanglement transiently; a tight cutoff blows up the bond. "
               f"Use a noise-matched cutoff (~1e-6).", flush=True)
     trajectories = [make_initial_mps(L, NB, rng=rng_master, init=init) for _ in range(max(n_local, 0))]
+    fields, couplings = model_system_terms(model, J=J, g=g, **(mparams or {}))
 
     sampled_cycles = []
     E_av = []
@@ -552,6 +598,7 @@ def run_ri_tebd_energy_trajectories_mpi(L=6, J=1.0, g=1.0, beta=0.5, NB=3,
                 system_sites=system_sites, bath_sites=bath_sites,
                 site_ordering=effective_ordering,
                 h_override=h_override, theta_override=theta_override, NT=NT,
+                model=model, mparams=mparams,
             )
             peak_bond_local = max(
                 peak_bond_local, int(cycle_info["peak_bond"])
@@ -572,7 +619,7 @@ def run_ri_tebd_energy_trajectories_mpi(L=6, J=1.0, g=1.0, beta=0.5, NB=3,
             E_sum_local = 0.0
             for t in range(n_local):
                 Et = energy_from_mps(
-                    trajectories[t], system_sites=system_sites, J=J, g=g,
+                    trajectories[t], system_sites, fields, couplings,
                     max_bond=chi, cutoff=cutoff
                 )
                 E_sum_local += Et
@@ -649,6 +696,13 @@ def parse_args():
     p.add_argument("--L", type=int, default=20)
     p.add_argument("--J", type=float, default=1.0)
     p.add_argument("--g", type=float, default=1.0)
+    p.add_argument("--model", choices=("ising", "xy", "heisenberg"), default="ising",
+                   help="system Hamiltonian: ising (-J XX -g Z), xy (-Jxx XX -Jyy YY), "
+                        "heisenberg (-Jxx XX -Jyy YY -Jzz ZZ).")
+    p.add_argument("--gx", type=float, default=0.0, help="transverse-x field (ising only).")
+    p.add_argument("--Jxx", type=float, default=None, help="XX coupling (default J).")
+    p.add_argument("--Jyy", type=float, default=None, help="YY coupling (default J).")
+    p.add_argument("--Jzz", type=float, default=None, help="ZZ coupling (default J).")
     p.add_argument("--beta", type=float, default=0.5)
     p.add_argument("--NB", type=int, default=3)
     p.add_argument("--ncycles", type=int, default=100)
@@ -659,11 +713,11 @@ def parse_args():
     p.add_argument("--delta", type=float, default=np.pi/40)
     p.add_argument("--T_factor", type=float, default=3.0)
     p.add_argument("--h", type=float, default=None,
-                   help="override bath frequency h (default max(2g,4J)); the reference uses 4.")
+                   help="override bath frequency h (default max(2g,4J)); Jerome uses 4.")
     p.add_argument("--theta", type=float, default=None,
-                   help="override system-bath coupling theta (default formula); the reference uses 1.")
+                   help="override system-bath coupling theta (default formula); Jerome uses 1.")
     p.add_argument("--NT", type=int, default=None,
-                   help="if set, use the reference window MT=max(NT,int(NT/a)) instead of T_factor.")
+                   help="if set, use Jerome's window MT=max(NT,int(NT/a)) instead of T_factor.")
     p.add_argument("--trotter_order", type=int, choices=(1, 2), default=2)
     p.add_argument(
         "--p1", type=float, default=None,
@@ -737,6 +791,7 @@ def main():
         p1=p1, p2=args.p2, p_reset=args.p_reset,
         site_ordering=args.site_ordering,
         h_override=args.h, theta_override=args.theta, NT=args.NT,
+        model=args.model, mparams=dict(gx=args.gx, Jxx=args.Jxx, Jyy=args.Jyy, Jzz=args.Jzz),
         init=args.init,
     )
 
