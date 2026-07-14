@@ -66,7 +66,7 @@ class GroundStateProtocol(Protocol):
     def gaussian_filter_function(self, sigma: float, delta: float, NT: int):
         """Gaussian filter — f[t] = exp(-(δt)²/(2σ²))."""
         a = delta/sigma
-        MT = max(NT, int(NT / a))
+        MT = max(int(NT), int(NT / a))
         f = [np.exp(-(a*t)**2 / 2) for t in np.arange(-MT, MT + 1)]
         f /= delta * np.sum(np.abs(f))
         return f
@@ -151,7 +151,7 @@ class GroundStateProtocol(Protocol):
         delta = self.require_real(params, "delta")
         h     = self.require_real(params, "h")
         sigma = self.require_real(params, "sigma")
-        NT    = self.require_int(params,  "NT", default=5)
+        NT    = self.require_real(params, "NT", default=5)
         theta = self.get_param(params, "theta")
 
         filter_kwargs = {}
