@@ -120,6 +120,13 @@ class Model(ABC):
         Two-site gates are applied layer-by-layer via bond_colouring().
         order=2 returns a symmetric second-order skeleton;
         Override for non-standard gate sets (e.g. Heisenberg gates).
+
+        Two-site operators are grouped by bond within each colour layer, so all
+        operators acting on the same pair (e.g. XX and YY for XY, or XX/YY/ZZ
+        for Heisenberg) sit in adjacent moments. These mutually commute on a
+        bond, so this reordering is exact, and it lets the compiler fuse them
+        into a single 2-qubit gate instead of one per operator. All two-site
+        groups precede one-site groups.
         """
         if order not in (1, 2):
             raise ValueError(f"System Trotter order must be 1 or 2, got {order!r}.")
@@ -128,24 +135,28 @@ class Model(ABC):
         qubits = self._device.system_qubits
         groups = []
 
-        for op_str, terms in cl.items():
-            if len(op_str) == 2:  # two-site
-                bond_strength = {(s, t): J for J, s, t in terms}
-                for layer in self._lattice.bond_colouring():
-                    group = []
-                    for s, t in layer:
-                        J = bond_strength.get((s, t), 0.)
-                        if J != 0.:
-                            group.append(self._GATE_MAP[op_str](J)(qubits[s], qubits[t]))
-                    if group:
-                        groups.append(group)
-            else:  # one-site
-                group = []
-                for strength, s in terms:
-                    if strength != 0.:
-                        group.append(self._GATE_MAP[op_str](strength)(qubits[s]))
-                if group:
-                    groups.append(group)
+        # two-site: {op_str: {(s, t): J}}, preserving insertion order
+        two_site = {op_str: {(s, t): J for J, s, t in terms}
+                    for op_str, terms in cl.items() if len(op_str) == 2}
+        one_site = {op_str: terms for op_str, terms in cl.items() if len(op_str) == 1}
+
+        for layer in self._lattice.bond_colouring():
+            group = []
+            for s, t in layer:
+                for op_str, bond_strength in two_site.items():
+                    J = bond_strength.get((s, t), 0.)
+                    if J != 0.:
+                        group.append(self._GATE_MAP[op_str](J)(qubits[s], qubits[t]))
+            if group:
+                groups.append(group)
+
+        for op_str, terms in one_site.items():
+            group = []
+            for strength, s in terms:
+                if strength != 0.:
+                    group.append(self._GATE_MAP[op_str](strength)(qubits[s]))
+            if group:
+                groups.append(group)
 
         if order == 1 or len(groups) <= 1:
             return [gate for group in groups for gate in group]
