@@ -12,15 +12,15 @@ class GroundStateProtocol(Protocol):
     """
     Ground state cooling protocol. Targets the ground state, with different filter functions.
     Currently supported filter functions: 'gaussian', 'constant', 'super_gaussian'.
-    Supported system-bath coupling gates: 'XX', 'YX', 'ZX'.
+    Supported system-bath coupling gates: 'XX', 'YX', 'ZX', 'iSWAP' (default not used).
     """
 
-    _COUPLING_GATE_MAP = {k: v for k, v in Protocol._COUPLING_GATE_MAP.items() if k != 'iSWAP'}
+    _COUPLING_GATE_MAP = {k: v for k, v in Protocol._COUPLING_GATE_MAP.items()}
 
     def __init__(self, device:"CoolingDevice", model:"Model", params:dict=None,
                  noise_model:"cirq.NoiseModel|None"=None, function="gaussian",
                  trotter_order=1, merge_single_qubit_gates: bool = True,
-                 drop_negligible_operations: bool = True, verbose: bool = False):
+                 drop_negligible_operations: bool = True, verbose: bool = False, allow_iSWAP = False):
 
         super().__init__(device, model, params, noise_model)
 
@@ -40,6 +40,14 @@ class GroundStateProtocol(Protocol):
         self.merge_single_qubit_gates = merge_single_qubit_gates
         self.drop_negligible_operations = drop_negligible_operations
         self.verbose = verbose
+
+        # Instance-level map shadows the class default (which excludes iSWAP).
+        # allow_iSWAP=True re-admits 'iSWAP' to the allowed coupling ops.
+        self.allow_iSWAP = allow_iSWAP
+        self._COUPLING_GATE_MAP = (
+            dict(Protocol._COUPLING_GATE_MAP) if allow_iSWAP
+            else {k: v for k, v in Protocol._COUPLING_GATE_MAP.items() if k != 'iSWAP'}
+        )
 
     @property
     def name(self):
