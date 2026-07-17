@@ -6,7 +6,7 @@ try:
 except ImportError:
     pass
 from .protocols import Protocol, DetailedBalanceProtocol, GroundStateProtocol
-from .measurements import Measurement, DefaultMeasurement1
+from .measurements import Measurement, DefaultMeasurement1, DefaultMeasurement2
 from .simulation import Simulation
 from .gates import YXPowGate, ZXPowGate
 from .noise import BasicNoiseModel

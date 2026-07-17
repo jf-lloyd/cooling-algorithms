@@ -1,1 +1,1 @@
-from .measure import Measurement, DefaultMeasurement1
+from .measure import Measurement, DefaultMeasurement1, DefaultMeasurement2

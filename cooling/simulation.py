@@ -17,8 +17,11 @@ from .measurements import DefaultMeasurement1
 # ── Parallel worker (module-level so it's picklable by spawn) ────────────────
 
 def _parallel_worker(args):
-    protocol, circuit_fn, R, k_worker, measure_every, seed, circuit_memoization_size = args
-    sim = Simulation(protocol)
+    (protocol, circuit_fn, R, k_worker, measure_every, seed,
+     circuit_memoization_size, measurement_cls) = args
+    # measurement_cls is a class, not an instance: classes pickle by reference,
+    # so this crosses the spawn boundary where a built Measurement could not.
+    sim = Simulation(protocol, measurement=measurement_cls)
     if circuit_memoization_size is not None and not hasattr(circuit_fn, 'sim_options'):
         sim.set_memoization_size(circuit_memoization_size)
     return sim.run(
@@ -42,14 +45,27 @@ class Simulation:
         The channel always contains a reset. Normally qsim rescans the whole circuit
         on every simulate() call to discover trajectory MC is needed.
         When True, we short-circuit qsim's _needs_trajectories to always return
-        True, skipping that scan. 
-        
+        True, skipping that scan.
+
+    measurement : Measurement, or a Measurement subclass (default DefaultMeasurement1)
+        Default measurement for run(). Pass either an instance, or the class itself
+        (e.g. cooling.DefaultMeasurement2), which is instantiated as
+        cls(device, model). run(measurement=...) still overrides per call.
+
     """
 
-    def __init__(self, protocol: "Protocol", assume_trajectories: bool = True):
+    def __init__(self, protocol: "Protocol", assume_trajectories: bool = True,
+                 measurement=None):
         self.protocol    = protocol
         self.device      = protocol.device
         self.model       = protocol.model
+
+        # Keep the class as well as the instance: run_parallel can only ship a
+        # class to spawned workers (a built Measurement holds unpicklable PauliSums).
+        self._measurement_cls = measurement if isinstance(measurement, type) else None
+        if isinstance(measurement, type):
+            measurement = measurement(self.device, self.model)
+        self.measurement = measurement
 
         # System qubits first: get_system_state reshape assumes this layout.
         self.qubit_order = self.device.qubits
@@ -149,7 +165,8 @@ class Simulation:
         circuit_fn   : Schedule, FrozenCircuit, or callable int → FrozenCircuit.
         R            : number of cooling steps per trajectory
         K            : number of independent trajectories
-        measurement  : Measurement; defaults to DefaultMeasurement1
+        measurement  : Measurement instance or subclass; overrides the one set on
+                       the Simulation. Defaults to that, else DefaultMeasurement1.
         measure_every : measure observables every this many steps (default 1).
         seed         : RNG seed
         circuit_memoization_size : override qsim memoization. If None and a
@@ -173,7 +190,9 @@ class Simulation:
                     f"change file tag or set overwrite=True to overwrite."
                 )
         if measurement is None:
-            measurement = DefaultMeasurement1(self.device, self.model)
+            measurement = self.measurement or DefaultMeasurement1(self.device, self.model)
+        elif isinstance(measurement, type):
+            measurement = measurement(self.device, self.model)
         circuit_fn = self._wrap(circuit_fn)
 
         # Derive three independent sub-seeds so all randomness is reproducible.
@@ -218,14 +237,33 @@ class Simulation:
 
     def run_parallel(self, circuit_fn, R: int, K: int, n_workers: int = None,
                      measure_every: int = 1, seed=None, circuit_memoization_size=None,
-                     tag: str = None, save_path: str = None, overwrite: bool = False) -> pd.DataFrame:
+                     tag: str = None, save_path: str = None, overwrite: bool = False,
+                     measurement=None) -> pd.DataFrame:
         """
         Run K trajectories split across n_workers processes.
 
         Same API as run(). n_workers defaults to min(K, cpu_count).
-        Custom measurements not supported (PauliSum not picklable).
+
+        measurement : Measurement *subclass* (not an instance), e.g.
+                      cooling.DefaultMeasurement2. Defaults to the one set on the
+                      Simulation, else DefaultMeasurement1. Workers are spawned, so
+                      only a class can be shipped: a built Measurement holds cirq
+                      PauliSums, which are not picklable. Each worker instantiates
+                      it as cls(device, model).
         """
         self._validate_run_args(R, K, measure_every)
+        # Resolve per-call arg, else the class given to __init__, else the instance
+        # given to __init__ (which cannot be shipped -> explicit error below).
+        measurement_cls = (measurement if measurement is not None
+                           else self._measurement_cls if self._measurement_cls is not None
+                           else self.measurement)
+        if measurement_cls is not None and not isinstance(measurement_cls, type):
+            raise TypeError(
+                "run_parallel needs a Measurement subclass, not an instance "
+                f"(got {type(measurement_cls).__name__}): spawned workers cannot "
+                "unpickle a built Measurement. Pass e.g. measurement=cooling.DefaultMeasurement2, "
+                "or use run() for a pre-built instance."
+            )
         schedule, raw_circuit_fn = self._unwrap_schedule(circuit_fn, circuit_memoization_size)
 
         if schedule is not None:
@@ -256,7 +294,8 @@ class Simulation:
         # saving is disabled in _parallel_worker.
         worker_circuit_fn = schedule if schedule is not None else raw_circuit_fn
         worker_args = [
-            (self.protocol, worker_circuit_fn, R, k, measure_every, ws, circuit_memoization_size)
+            (self.protocol, worker_circuit_fn, R, k, measure_every, ws,
+             circuit_memoization_size, measurement_cls)
             for k, ws in zip(k_splits, worker_seeds)
         ]
 
