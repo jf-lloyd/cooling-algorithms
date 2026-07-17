@@ -17,6 +17,7 @@ from quspin.basis import spin_basis_general
 
 
 PATH = os.path.join(os.path.dirname(__file__), "..", "data", "spectra") + os.sep
+PATH_STATES = os.path.join(os.path.dirname(__file__), "..", "data", "eigenstates") + os.sep
 
 # Basis rotations that make the Hamiltonian compatible with QuSpin's spin-inversion
 # operator prod_i X_i. Each rotation maps the offending single-site field to X
@@ -96,7 +97,8 @@ def _is_uniform(coupling_lists):
 
 
 def ModelSpec(model, k=None, save=True, verbal=True, return_H=False,
-              translation=True, parity=True, Z2=True, U1=True):
+              translation=True, parity=True, Z2=True, U1=True,
+              return_sectors=False, return_states=False):
     """
     QuSpin ED for any Model. Symmetries are detected and applied automatically.
 
@@ -106,6 +108,11 @@ def ModelSpec(model, k=None, save=True, verbal=True, return_H=False,
     Note: Z2 and U1 are mutually exclusive. If U1 is active, Z2 is skipped
     because spin-inversion maps Nup -> Ns-Nup, making it incompatible with
     fixed-Nup sectors.
+
+    return_sectors=True (only with k=None): return a pandas DataFrame of every
+    eigenvalue labelled by its symmetry-sector quantum numbers (columns among
+    'kxblock', 'kyblock', 'pblock', 'zblock', 'Nup', 'Mz', plus 'E'), sorted by
+    E. Bypasses the disk cache (which stores only the flat spectrum).
     """
     fname = f"{model.name}_Spec"
     fname_path = os.path.join(PATH, fname + ".pkl")
@@ -117,11 +124,18 @@ def ModelSpec(model, k=None, save=True, verbal=True, return_H=False,
         H, _ = _build_H(model, basis_full)
         return H
 
-    if os.path.isfile(fname_path):
+    # eigenstate cache: per-sector (labels, basis, E, V) blocks, saved to eigenstates/
+    states_fname = f"{model.name}_States"
+    if return_states and os.path.isfile(os.path.join(PATH_STATES, states_fname + ".pkl")):
+        if verbal: print("loading pre-computed eigenstates", states_fname)
+        return loader(states_fname, path=PATH_STATES)
+
+    if os.path.isfile(fname_path) and not (return_sectors or return_states):
         if verbal: print("loading pre-computed energies", fname)
         Elist = loader(fname, path=PATH)
         return Elist if k is None else Elist[:k]
-    if verbal: print("calculating new energies", fname)
+    if verbal and not return_states: print("calculating new energies", fname)
+    if verbal and return_states: print("calculating new eigenstates", states_fname)
 
     cl = model.coupling_lists
     Lx, Ly, pbc_x, pbc_y = _lattice_geometry(model.lattice)
@@ -215,6 +229,42 @@ def ModelSpec(model, k=None, save=True, verbal=True, return_H=False,
 
     def build_H_for_basis(basis):
         return hamiltonian([[op, bl] for op, bl in ops], [], basis=basis, **sector_kw)
+
+    if k is None and return_states:
+        blocks = []
+        for sector in itertools.product(*sym_qnums):
+            for nup in nup_list:
+                basis = get_basis(sector, nup)
+                if basis.Ns == 0:
+                    continue
+                H = build_H_for_basis(basis)
+                E, V = H.eigh()
+                lab = dict(zip(sym_names, sector))
+                if nup is not None:
+                    lab["Nup"] = nup
+                    lab["Mz"] = 2 * nup - Ns
+                blocks.append({"labels": lab, "basis": basis,
+                               "E": np.asarray(E), "V": np.asarray(V)})
+        if save:
+            saver(blocks, states_fname, PATH_STATES)
+        return blocks
+
+    if k is None and return_sectors:
+        import pandas as pd
+        rows = []
+        for sector in itertools.product(*sym_qnums):
+            for nup in nup_list:
+                H = build_H_for_basis(get_basis(sector, nup))
+                E, _ = H.eigh()
+                lab = dict(zip(sym_names, sector))
+                if nup is not None:
+                    lab["Nup"] = nup
+                    lab["Mz"] = 2 * nup - Ns   # total Sz in +-1 (pauli) units
+                rows.extend({**lab, "E": float(e)} for e in E)
+        df = pd.DataFrame(rows).sort_values("E").reset_index(drop=True)
+        assert len(df) == 2 ** Ns, \
+            f"Sector decomposition incomplete: got {len(df)} eigenvalues, expected {2**Ns}"
+        return df
 
     if k is None:
         Elist = []
