@@ -8,19 +8,19 @@ Documentation on cirq (https://quantumai.google/cirq) and qsim (https://quantuma
 
 Requires **Python ≥ 3.10**. 
 
-# 1. create and activate an environment
+#### 1. create and activate an environment
 conda create -n cooling python=3.10
 conda activate cooling
 
-# 2. cirq, qsim, pandas
-conda install -c conda-forge cirq=1.3
-pip install qsimcirq==0.21.0 pandas
+#### 2. cirq, qsim, pandas
+conda install -c conda-forge cirq
+pip install qsimcirq pandas
 
-# 3. (optional for ED) QuSpin 
-# see installation docs https://quspin.github.io/QuSpin/installation/installation.html
+#### 3. (optional for ED) QuSpin 
+#### see installation docs https://quspin.github.io/QuSpin/installation/installation.html
 pip install quspin 
 
-# 4. install this package in editable mode (registers `import cooling`)
+#### 4. install this package in editable mode (registers `import cooling`)
 pip install -e .
 
 ## Minimal example
