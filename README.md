@@ -13,12 +13,10 @@ Simulation based on time-evolving block decimation (TEBD) due to **Yuxuan Zhang*
 
 #### 0. clone the repo
 git clone https://github.com/jf-lloyd/cooling-algorithms.git  
-
 cd cooling-algorithms  
 
 #### 1. create and activate an environment
-conda create -n cooling -c conda-forge python=3.12 cirq qsimcirq numba pandas pyarrow
-
+conda create -n cooling -c conda-forge python=3.12 cirq qsimcirq numba pandas pyarrow  
 conda activate cooling
 
 #### 2. (optional for ED) QuSpin 
