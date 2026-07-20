@@ -68,7 +68,7 @@ class DetailedBalanceProtocol(Protocol):
     def gaussian_filter_function(self, beta:float, delta:float, h:float, NT:int):
         """Gaussian detailed balance filter — width ~ sqrt(beta/h)."""
         a  = delta * np.sqrt(abs(4 * h / beta))
-        MT = max(NT, int(NT / a))
+        MT = max(int(NT), int(NT / a))
         f  = np.array([np.exp(-a**2 * t**2 / 2) for t in np.arange(-MT, MT + 1)])
         f /= delta * np.sum(np.abs(f))
         return f
@@ -77,7 +77,7 @@ class DetailedBalanceProtocol(Protocol):
         """Modulated coupling pulse (sinc/sinh step-function filter)."""
         if not np.isclose(h, np.pi / 2):
             raise ValueError(f"mcp requires h=π/2, got h={h:.4f}")
-        MT = max(NT, int(NT * beta / delta))
+        MT = max(int(NT), int(NT * beta / delta))
         f  = []
         for t in np.arange(-MT, MT + 1):
             if t == 0:
@@ -133,7 +133,8 @@ class DetailedBalanceProtocol(Protocol):
                 h      : float — bath splitting
                 theta  : float — coupling strength
             Optional:
-                NT     : int (default 5) — filter truncation / circuit depth
+                NT     : float (default 5) — filter truncation / circuit depth
+                         (non-integer allowed; MT floors it, then extends via 1/a)
 
         trotter_order (set in __init__, default 1):
             1 — first-order (Lie-Trotter) split: sys(δ) -> bath(δ) -> coupling(δ·f[j])
@@ -150,7 +151,7 @@ class DetailedBalanceProtocol(Protocol):
         beta  = self.require_real(params, "beta")
         delta = self.require_real(params, "delta")
         h     = self.require_real(params, "h")
-        NT    = self.require_int(params,  "NT", default=5)
+        NT    = self.require_real(params, "NT", default=5)
         theta = self.get_param(params, "theta")
 
         filter_f = self.filter_function(beta, delta, h, NT)
