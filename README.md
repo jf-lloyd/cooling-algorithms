@@ -20,8 +20,8 @@ conda create -n cooling -c conda-forge python=3.12 cirq qsimcirq numba pandas py
 conda activate cooling
 
 #### 2. (optional for ED) QuSpin 
-#### see installation docs https://quspin.github.io/QuSpin/installation/installation.html 
-#### the install run into issues on mac
+#### see installation docs https://quspin.github.io/QuSpin/installation/installation.html
+#### the install may run into issues on mac  
 pip install quspin          # exact diagonalisation (ed.py); omit if you don't need ED
 
 #### 3. install this package in editable mode (registers `import cooling`)
