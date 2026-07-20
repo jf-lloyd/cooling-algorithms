@@ -16,12 +16,13 @@ git clone https://github.com/jf-lloyd/cooling-algorithms.git
 cd cooling-algorithms  
 
 #### 1. create and activate an environment
-conda create -n cooling python=3.12  
+conda create -n cooling python=3.10  
 conda activate cooling  
 
-#### 2. cirq, qsim, pandas
+#### 2. cirq, qsim, pandas, pyarrow
 conda install -c conda-forge cirq  
-pip install qsimcirq pandas
+pip install qsimcirq pandas pyarrow
+
 
 #### 3. (optional for ED) QuSpin 
 #### see installation docs https://quspin.github.io/QuSpin/installation/installation.html  
