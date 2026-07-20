@@ -26,6 +26,7 @@ pip install qsimcirq pandas pyarrow
 
 #### 3. (optional for ED) QuSpin 
 #### see installation docs https://quspin.github.io/QuSpin/installation/installation.html  
+#### currently the quspin pip install (numpy>2.0) is in conflict with qsim (numpy<2.0) so it is suggested to skip this step
 pip install quspin 
 
 #### 4. install this package in editable mode (registers `import cooling`)
