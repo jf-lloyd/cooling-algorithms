@@ -16,20 +16,15 @@ git clone https://github.com/jf-lloyd/cooling-algorithms.git
 cd cooling-algorithms  
 
 #### 1. create and activate an environment
-conda create -n cooling python=3.10  
-conda activate cooling  
+conda create -n cooling -c conda-forge python=3.12 cirq qsimcirq numba pandas pyarrow
+conda activate cooling
 
-#### 2. cirq, qsim, pandas, pyarrow
-conda install -c conda-forge cirq  
-pip install qsimcirq pandas pyarrow
+#### 2. (optional for ED) QuSpin 
+#### see installation docs https://quspin.github.io/QuSpin/installation/installation.html 
+#### the install run into issues on mac
+pip install quspin          # exact diagonalisation (ed.py); omit if you don't need ED
 
-
-#### 3. (optional for ED) QuSpin 
-#### see installation docs https://quspin.github.io/QuSpin/installation/installation.html  
-#### currently the quspin pip install (numpy>2.0) is in conflict with qsim (numpy<2.0) so it is suggested to skip this step
-pip install quspin 
-
-#### 4. install this package in editable mode (registers `import cooling`)
+#### 3. install this package in editable mode (registers `import cooling`)
 pip install -e .
 
 ## Minimal example
