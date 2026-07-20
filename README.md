@@ -1,4 +1,6 @@
 # cooling-algorithms
+
+Author:Jerome Lloyd <jerome.lloyd@unige.ch>
 Cooling algorithms simulation code, using Google's cirq and qsim circuit emulator. 
 
 Theory behind the algorithms can be found in (https://arxiv.org/abs/2506.21318, https://arxiv.org/abs/2404.12175). 
