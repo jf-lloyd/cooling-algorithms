@@ -6,10 +6,13 @@ Documentation on cirq (https://quantumai.google/cirq) and qsim (https://quantuma
 
 ## Installation 
 
-Requires **Python ≥ 3.10**. 
+#### 0. clone the repo
+git clone https://github.com/jf-lloyd/cooling-algorithms.git
+
+cd cooling-algorithms
 
 #### 1. create and activate an environment
-conda create -n cooling python=3.10
+conda create -n cooling python=3.12
 
 conda activate cooling
 
