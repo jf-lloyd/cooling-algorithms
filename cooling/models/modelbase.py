@@ -17,7 +17,7 @@ class Model(ABC):
     The base class provides default implementations of:
         - build_system_layer  : translates coupling_lists to Cirq gates via _GATE_MAP.
             Two-site gates are applied layer-by-layer using lattice.bond_colouring().
-            Override if XX,YY,ZZ decomposition not required (e.g. Heisenberg gates, iSWAP).
+            Note that circuit complication can later replace e.g. XX gates with e.g. CPhase gates
         - build_hamiltonian : translates coupling_lists to a cirq.PauliSum and
             commuting components dict, keyed by operator string.
 
@@ -25,8 +25,8 @@ class Model(ABC):
         model.hamiltonian            : full Hamiltonian as cirq.PauliSum
         model.hamiltonian_components : dict of commuting pieces {op_str: cirq.PauliSum}
         model.coupling_lists         : coupling data to define Hamiltonian, gates
-        model.system_layer           : first-order list of Cirq gates for one system evolution step
-        model.system_layer_o2        : second-order symmetric system gate skeleton, built lazily
+        model.system_layer           : first-order Trotter list of Cirq gates for one system evolution step
+        model.system_layer_o2        : second-order symmetric Trotter list of Cirq gates for one system evolution step
     """
 
     # Maps operator strings to Cirq gate constructors.

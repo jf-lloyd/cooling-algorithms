@@ -78,7 +78,7 @@ class Lattice(ABC):
 
         Some lattices (e.g. a 2-site PBC chain) yield the same neighbour twice
         from nearest_neighbours(s) since the "+1" and "-1" directions coincide;
-        dedupe here so each physical bond is counted once in the Hamiltonian."""
+        here each physical bond is counted once in the Hamiltonian."""
         pairs = []
         seen = set()
         for s in range(self.Ns):

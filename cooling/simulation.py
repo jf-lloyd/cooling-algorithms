@@ -14,13 +14,11 @@ from tqdm import tqdm
 
 from .measurements import DefaultMeasurement1
 
-# ── Parallel worker (module-level so it's picklable by spawn) ────────────────
+# ── Parallel worker ────────────────
 
 def _parallel_worker(args):
     (protocol, circuit_fn, R, k_worker, measure_every, seed,
      circuit_memoization_size, measurement_cls) = args
-    # measurement_cls is a class, not an instance: classes pickle by reference,
-    # so this crosses the spawn boundary where a built Measurement could not.
     sim = Simulation(protocol, measurement=measurement_cls)
     if circuit_memoization_size is not None and not hasattr(circuit_fn, 'sim_options'):
         sim.set_memoization_size(circuit_memoization_size)
