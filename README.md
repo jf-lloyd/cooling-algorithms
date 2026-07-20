@@ -7,6 +7,8 @@ Cooling algorithms simulation code, using Google's cirq and qsim circuit emulato
 Theory behind the algorithms can be found in (https://arxiv.org/abs/2506.21318, https://arxiv.org/abs/2404.12175). 
 Documentation on cirq (https://quantumai.google/cirq) and qsim (https://quantumai.google/qsim). 
 
+Simulation based on time-evolving block decimation (TEBD) due to **Yuxuan Zhang** is found in the tebd folder.
+
 ## Installation 
 
 #### 0. clone the repo
