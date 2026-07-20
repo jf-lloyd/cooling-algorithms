@@ -1,6 +1,6 @@
 # cooling-algorithms
 
-Author:Jerome Lloyd <jerome.lloyd@unige.ch>
+Author: **Jerome Lloyd** <jerome.lloyd@unige.ch>;
 Cooling algorithms simulation code, using Google's cirq and qsim circuit emulator. 
 
 Theory behind the algorithms can be found in (https://arxiv.org/abs/2506.21318, https://arxiv.org/abs/2404.12175). 
@@ -9,18 +9,15 @@ Documentation on cirq (https://quantumai.google/cirq) and qsim (https://quantuma
 ## Installation 
 
 #### 0. clone the repo
-git clone https://github.com/jf-lloyd/cooling-algorithms.git
-
+git clone https://github.com/jf-lloyd/cooling-algorithms.git ;
 cd cooling-algorithms
 
 #### 1. create and activate an environment
-conda create -n cooling python=3.12
-
+conda create -n cooling python=3.12 ;
 conda activate cooling
 
 #### 2. cirq, qsim, pandas
-conda install -c conda-forge cirq
-
+conda install -c conda-forge cirq ;
 pip install qsimcirq pandas
 
 #### 3. (optional for ED) QuSpin 
