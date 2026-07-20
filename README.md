@@ -10,10 +10,12 @@ Requires **Python ≥ 3.10**.
 
 #### 1. create and activate an environment
 conda create -n cooling python=3.10
+
 conda activate cooling
 
 #### 2. cirq, qsim, pandas
 conda install -c conda-forge cirq
+
 pip install qsimcirq pandas
 
 #### 3. (optional for ED) QuSpin 
