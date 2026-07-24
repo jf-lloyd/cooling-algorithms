@@ -79,8 +79,8 @@ class GroundStateProtocol(Protocol):
         f /= delta * np.sum(np.abs(f))
         return f
 
-    def constant_filter_function(self, delta: float, NT: int):
-        """Constant (flat) filter — f[t] = 1."""
+    def constant_filter_function(self, sigma: float, delta: float, NT: int):
+        """Constant (flat) filter — f[t] = 1. sigma unused (kept for uniform signature)."""
         MT = int(NT)
         f = np.ones(2 * MT + 1)
         f /= delta * np.sum(np.abs(f))
@@ -159,7 +159,7 @@ class GroundStateProtocol(Protocol):
         params = {**self.params, **(params or {})}
         delta = self.require_real(params, "delta")
         h     = self.require_real(params, "h")
-        sigma = self.require_real(params, "sigma")
+        sigma = self.require_real(params, "sigma", default=1.)
         NT    = self.require_real(params, "NT", default=5)
         theta = self.get_param(params, "theta")
 
