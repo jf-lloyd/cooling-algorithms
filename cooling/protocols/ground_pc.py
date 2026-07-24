@@ -79,7 +79,7 @@ class GroundStateProtocol(Protocol):
         f /= delta * np.sum(np.abs(f))
         return f
 
-    def constant_filter_function(self, sigma: float, delta: float, NT: int):
+    def constant_filter_function(self, delta: float, NT: int):
         """Constant (flat) filter — f[t] = 1."""
         MT = int(NT/delta)
         f = np.ones(2 * MT + 1)
