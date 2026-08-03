@@ -52,16 +52,31 @@ class Measurement:
         self.add_observable('total_S2', Stot2)
         return self
 
+    def add_spinspin_correlators(self):
+        """
+        Add all-pairs two-site correlators <X_iX_j>, <Y_iY_j>, <Z_iZ_j> 
+        """
+        q = self.device.system_qubits
+        Ns = len(q)
+        for i in range(Ns):
+            for j in range(i + 1, Ns):
+                self.add_observable(f'XX_{i}_{j}', cirq.X(q[i]) * cirq.X(q[j]))
+                self.add_observable(f'YY_{i}_{j}', cirq.Y(q[i]) * cirq.Y(q[j]))
+                self.add_observable(f'ZZ_{i}_{j}', cirq.Z(q[i]) * cirq.Z(q[j]))
+        return self
+
 
 class DefaultMeasurement1(Measurement):
 
     """
-    simple measurement containing total spin and (zero-order) Hamiltonian
+    simple measurement containing total spin, all-pairs two-site correlators,
+    and (zero-order) Hamiltonian
     """
     def __init__(self, device:"Device", model:"Model"):
         super().__init__(device)
         self.add_Hamiltonian(model)
         self.add_total_spin()
+        self.add_spinspin_correlators()
 
 
 class DefaultMeasurement2(DefaultMeasurement1):
