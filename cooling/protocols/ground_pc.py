@@ -53,9 +53,11 @@ class GroundStateProtocol(Protocol):
     def name(self):
         p = self.params
         parts = []
-        for key, fmt in [('delta', 'd{:.4f}'), ('h', 'h{:.2f}'), ('sigma', 's{:.3f}'), ('theta', 'th{:.3f}')]:
+        for key, fmt in [('T', 'T{:.4f}'), ('N', 'N{:.0f}'), ('h', 'h{:.2f}'), ('sigma', 's{:.3f}'), ('theta', 'th{:.3f}')]:
             if key in p:
                 parts.append(fmt.format(p[key]))
+        p2 = getattr(self.noise_model, 'p2', 0.)
+        parts.append(f"p{p2:.2e}")
         parts.append(self.function)
         if self.trotter_order == 2:
             parts.append("o2")
@@ -139,13 +141,21 @@ class GroundStateProtocol(Protocol):
         coupling_ops      : dict {bath_idx: op_string}, op_string in {'X', 'Y', 'Z'}
         params:
             Required:
-                delta  : float — Trotter angle
+                T      : float — filter half-duration; delta = T/N, so N*delta = T exactly
+                         (full filter span = 2*T)
+                N      : float — number of filter layers (one-sided); MT = int(N)
                 h      : float — bath splitting
-                sigma  : float — filter time-domain width (continuous time)
                 theta  : float — coupling strength
             Optional:
-                NT     : int (default 5) — filter half-length (circuit depth ~ 2*NT+1 steps)
+                sigma  : float (default 1.) — filter time-domain width (continuous time)
                 SG_N   : int (default 2, super_gaussian only) — super-Gaussian order n
+
+        T, N replace the old (delta, NT) pair as the independent scan variables:
+        delta (the Trotter step) is derived as delta = T/N, so T fixes the filter's
+        physical half-duration (hence its frequency-domain width, ~1/T) while N controls
+        the Trotter step size independently of that width -- see the T/N reparametrization
+        discussion: scanning delta directly at fixed NT confounds filter width (~1/(NT*delta))
+        with Trotter-step accuracy, since both changed together with delta.
 
         trotter_order (set in __init__, default 1):
             1 — first-order (Lie-Trotter) split: sys(δ) -> bath(δ) -> coupling(δ·f[j])
@@ -157,10 +167,12 @@ class GroundStateProtocol(Protocol):
         self.validate_geometry(coupling_geometry, coupling_ops)
 
         params = {**self.params, **(params or {})}
-        delta = self.require_real(params, "delta")
+        T     = self.require_real(params, "T")
+        N     = self.require_real(params, "N")
+        delta = T / N
+        NT    = N
         h     = self.require_real(params, "h")
         sigma = self.require_real(params, "sigma", default=1.)
-        NT    = self.require_real(params, "NT", default=5)
         theta = self.get_param(params, "theta")
 
         filter_kwargs = {}

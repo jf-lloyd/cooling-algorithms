@@ -52,6 +52,8 @@ class DetailedBalanceProtocol(Protocol):
                          ('h', 'h{:.2f}'), ('theta', 'th{:.3f}')]:
             if key in p:
                 parts.append(fmt.format(p[key]))
+        p2 = getattr(self.noise_model, 'p2', 0.)
+        parts.append(f"p{p2:.2e}")
         parts.append(self.function)
         if self.trotter_order == 2:
             parts.append("o2")
