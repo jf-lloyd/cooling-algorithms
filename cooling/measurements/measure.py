@@ -76,10 +76,22 @@ class DefaultMeasurement1(Measurement):
         super().__init__(device)
         self.add_Hamiltonian(model)
         self.add_total_spin()
-        self.add_spinspin_correlators()
 
 
 class DefaultMeasurement2(DefaultMeasurement1):
+
+    """
+    as DefaultMeasurement1, plus local single-site <X_k>, <Y_k>, <Z_k> for every
+    system qubit k, and spin-spin correlators <X_kX_j>, <Y_kY_j>, <Z_kZ_j>
+    """
+    def __init__(self, device:"Device", model:"Model"):
+        super().__init__(device, model)
+        self.add_local_Sops()
+        self.add_spinspin_correlators()
+
+
+
+class DefaultMeasurement3(DefaultMeasurement1):
 
     """
     as DefaultMeasurement1, plus the magnetisation-resolved energy decomposition.
