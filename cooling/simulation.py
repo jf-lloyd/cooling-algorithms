@@ -152,7 +152,7 @@ class Simulation:
         if path is None:
             path = self._default_path
         os.makedirs(path, exist_ok=True)
-        record.to_parquet(os.path.join(path, fname + ".parquet"))
+        record.to_parquet(os.path.join(path, fname + ".parquet"), compression="gzip")
 
     def run(self, circuit_fn, R: int, K: int = 1, measurement=None, measure_every: int = 1, seed=None,
             circuit_memoization_size=None, tag: str = None, save_path: str = None,
