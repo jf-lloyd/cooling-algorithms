@@ -59,8 +59,7 @@ class GroundStateProtocol(Protocol):
         p2 = getattr(self.noise_model, 'p2', 0.)
         parts.append(f"p{p2:.2e}")
         parts.append(self.function)
-        if self.trotter_order == 2:
-            parts.append("o2")
+        parts.append(f"o{self.trotter_order}")
         return "_".join(parts)
 
     @property
