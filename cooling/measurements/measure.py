@@ -29,6 +29,28 @@ class Measurement:
             measurement[name] = val
         return measurement
 
+    def _apply_pauli_sum(self, operator, psi):
+        """phi = O|psi> for a cirq.PauliSum, applied term-by-term (no dense matrix)."""
+        Ns  = self.device.Ns
+        idx = self.device.qubit_index_map
+        psi_t = np.asarray(psi).reshape((2,) * Ns).astype(np.complex128)
+        phi   = np.zeros_like(psi_t)
+        for ps in operator:
+            c = complex(ps.coefficient)
+            if not ps.qubits:                      # identity term
+                phi += c * psi_t
+                continue
+            out = cirq.apply_unitary(
+                ps / c,                            # unit coefficient -> unitary
+                cirq.ApplyUnitaryArgs(
+                    target_tensor=psi_t.copy(),
+                    available_buffer=np.zeros_like(psi_t),
+                    axes=tuple(idx[q] for q in ps.qubits),
+                ),
+            )
+            phi += c * out
+        return phi.reshape(-1)
+
     def add_Hamiltonian(self, model:"Model"):
         operator = model.hamiltonian
         self.add_observable('H0', operator)
@@ -70,7 +92,7 @@ class DefaultMeasurement1(Measurement):
 
     """
     simple measurement containing total spin, all-pairs two-site correlators,
-    and (zero-order) Hamiltonian
+    and (zero-order trotter) Hamiltonian
     """
     def __init__(self, device:"Device", model:"Model"):
         super().__init__(device)
@@ -82,12 +104,21 @@ class DefaultMeasurement2(DefaultMeasurement1):
 
     """
     as DefaultMeasurement1, plus local single-site <X_k>, <Y_k>, <Z_k> for every
-    system qubit k, and spin-spin correlators <X_kX_j>, <Y_kY_j>, <Z_kZ_j>
+    system qubit k, spin-spin correlators <X_kX_j>, <Y_kY_j>, <Z_kZ_j>, and
+    <H^2> 
     """
     def __init__(self, device:"Device", model:"Model"):
         super().__init__(device, model)
         self.add_local_Sops()
         self.add_spinspin_correlators()
+        self._H_hsq = model.hamiltonian
+
+    def measure_from_state_vector(self, state):
+        measurement = super().measure_from_state_vector(state)
+        psi = np.asarray(state).ravel().astype(np.complex128)
+        phi = self._apply_pauli_sum(self._H_hsq, psi)   # H|psi>
+        measurement['Hsq'] = float(np.sum(np.abs(phi) ** 2))   # <psi|H^2|psi> = ||H|psi>||^2
+        return measurement
 
 
 
@@ -128,28 +159,6 @@ class DefaultMeasurement3(DefaultMeasurement1):
         pc = np.array([bin(i).count("1") for i in range(2 ** Ns)])
         self._H_mres  = model.hamiltonian
         self._sectors = [((Ns - 2 * k) / 2, pc == k) for k in range(Ns + 1)]
-
-    def _apply_pauli_sum(self, operator, psi):
-        """phi = O|psi> for a cirq.PauliSum, applied term-by-term (no dense matrix)."""
-        Ns  = self.device.Ns
-        idx = self.device.qubit_index_map
-        psi_t = np.asarray(psi).reshape((2,) * Ns).astype(np.complex128)
-        phi   = np.zeros_like(psi_t)
-        for ps in operator:
-            c = complex(ps.coefficient)
-            if not ps.qubits:                      # identity term
-                phi += c * psi_t
-                continue
-            out = cirq.apply_unitary(
-                ps / c,                            # unit coefficient -> unitary
-                cirq.ApplyUnitaryArgs(
-                    target_tensor=psi_t.copy(),
-                    available_buffer=np.zeros_like(psi_t),
-                    axes=tuple(idx[q] for q in ps.qubits),
-                ),
-            )
-            phi += c * out
-        return phi.reshape(-1)
 
     def measure_from_state_vector(self, state):
         measurement = super().measure_from_state_vector(state)
