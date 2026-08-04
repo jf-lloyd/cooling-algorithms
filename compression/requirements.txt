@@ -1,0 +1,8 @@
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7
+# optional: only needed to REGENERATE data with scripts/
+torch>=2.0            # cc_cycle_adam.py, cc_trot_sweep.py
+# optional: only for the cirq/qsim ground-truth protocol reference
+cirq-core>=1.3        # protocol/
+qsimcirq>=0.21        # protocol/
