@@ -94,20 +94,24 @@ class Simulation:
     }
 
     def _qsim_options(self) -> dict:
-        """self.options (long or short keys) -> the short-key dict qsim understands."""
-        short = set(self._QSIM_KEYS.values())
+        """self.options (long or short keys) -> the short-key dict qsim understands.
+
+        The accepted short keys are read from the installed qsim, so this keeps
+        working when a new qsim release adds options.
+        """
+        short = set(qsim.QSimOptions().as_dict())
         out = {}
         for key, value in self.options.items():
-            if key in self._QSIM_KEYS:
-                out[self._QSIM_KEYS[key]] = value
-            elif key in short:
-                out[key] = value
+            mapped = self._QSIM_KEYS.get(key, key)
+            if mapped in short:
+                out[mapped] = value
             else:
                 raise ValueError(
                     f"Unknown qsim option {key!r}. Use one of "
-                    f"{sorted(self._QSIM_KEYS)} (or the short qsim keys {sorted(short)}). "
-                    "Unrecognised keys are ignored by qsim, which silently changes "
-                    "the simulation (e.g. GPU execution falls back to CPU)."
+                    f"{sorted(k for k, v in self._QSIM_KEYS.items() if v in short)} "
+                    f"(or the short qsim keys {sorted(short)}). Unrecognised keys are "
+                    "ignored by qsim, which silently changes the simulation "
+                    "(e.g. GPU execution falls back to CPU)."
                 )
         return out
 
