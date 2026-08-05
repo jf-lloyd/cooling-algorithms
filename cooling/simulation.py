@@ -77,10 +77,44 @@ class Simulation:
         self.memoization = 1
         self.set_memoization_size()
 
+    # qsim's dict interface accepts only the SHORT keys produced by
+    # QSimOptions.as_dict(); any other key is silently ignored. Writing
+    # options['use_gpu'] = True therefore has NO effect and the run stays on the
+    # CPU. Map the readable names onto the short keys, and reject typos loudly.
+    _QSIM_KEYS = {
+        'max_fused_gate_size': 'f',
+        'cpu_threads':         't',
+        'ev_noisy_repetitions':'r',
+        'use_gpu':             'g',
+        'gpu_mode':            'gmode',
+        'gpu_state_threads':   'gsst',
+        'gpu_data_blocks':     'gdb',
+        'verbosity':           'v',
+        'denormals_are_zeros': 'z',
+    }
+
+    def _qsim_options(self) -> dict:
+        """self.options (long or short keys) -> the short-key dict qsim understands."""
+        short = set(self._QSIM_KEYS.values())
+        out = {}
+        for key, value in self.options.items():
+            if key in self._QSIM_KEYS:
+                out[self._QSIM_KEYS[key]] = value
+            elif key in short:
+                out[key] = value
+            else:
+                raise ValueError(
+                    f"Unknown qsim option {key!r}. Use one of "
+                    f"{sorted(self._QSIM_KEYS)} (or the short qsim keys {sorted(short)}). "
+                    "Unrecognised keys are ignored by qsim, which silently changes "
+                    "the simulation (e.g. GPU execution falls back to CPU)."
+                )
+        return out
+
     def set_memoization_size(self, size:int=2):
         ## memoization sets how many circuits qsim stores in memory
         self.memoization = size
-        self.simulator = qsim.QSimSimulator(self.options, circuit_memoization_size=size)
+        self.simulator = qsim.QSimSimulator(self._qsim_options(), circuit_memoization_size=size)
 
     # ── State helpers ─────────────────────────────────────────────────────────
 
@@ -200,7 +234,7 @@ class Simulation:
         rng = np.random.default_rng(rng_seed)
         # Rebuild simulator with a fixed qsim seed (controls trajectory collapses).
         self.simulator = qsim.QSimSimulator(
-            self.options, circuit_memoization_size=self.memoization,
+            self._qsim_options(), circuit_memoization_size=self.memoization,
             seed=int(np.random.default_rng(qsim_seed).integers(2**31))
         )
         # Reseed the schedule's circuit-selection RNG so repeated run() calls
