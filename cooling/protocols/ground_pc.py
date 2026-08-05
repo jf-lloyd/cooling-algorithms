@@ -109,9 +109,9 @@ class GroundStateProtocol(Protocol):
 
     def fourier_filter_function(self, omega: float, flist, h: float, delta: float):
         """Fourier-transformed filter function."""
-        MT    = len(flist) // 2
-        tlist = np.arange(-MT, MT + 1)
-        return np.sum([flist[t] * np.exp(1j * (h - omega) * delta * tlist[t]) for t in range(len(tlist))])
+        n     = len(flist)
+        tlist = np.arange(n) - (n - 1) / 2
+        return np.sum([flist[t] * np.exp(1j * (h - omega) * delta * tlist[t]) for t in range(n)])
 
     # ── Circuit building helpers ──────────────────────────────────────────────
 
