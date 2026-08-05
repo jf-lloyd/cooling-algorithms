@@ -68,40 +68,44 @@ class GroundStateProtocol(Protocol):
         print(self.channel.__doc__)
 
     # ── Filter functions ──────────────────────────────────────────────────────
-    # All filters share the signature (sigma, delta, NT) and return a normalised
-    # array f of length 2*NT+1.  sigma is the time-domain width (continuous time
-    # units: the filter decays / is truncated over |δt| ~ sigma).
+    # All filters share the signature (sigma, T, N) and return a normalised
+    # array f of length N.  sigma is the time-domain width (continuous time
+    # units: the filter decays / is truncated over |δt| ~ sigma). delta = 2*T/N
+    # is derived internally by each filter.
 
-    def gaussian_filter_function(self, sigma: float, delta: float, NT: int):
-        """Gaussian filter — f[t] = exp(-(δt)²/(2σ²))."""
-        a = delta/sigma
-        MT = max(int(NT), int(NT / a))
-        f = [np.exp(-(a*t)**2 / 2) for t in np.arange(-MT, MT + 1)]
+    def gaussian_filter_function(self, sigma: float, T: float, N: int):
+        """Gaussian filter — f[t] = exp(-(δt)²/(2σ²)). N must be odd (filter is
+        symmetric about t=0); f has length N exactly (N=5 -> t = -2..2)."""
+        if N % 2 == 0:
+            raise ValueError(f"N must be odd for the gaussian filter, got {N!r}")
+        delta = 2 * T / N
+        a = delta / sigma
+        f = [np.exp(-(a*t)**2 / 2) for t in np.arange(-N//2, N//2 + 1)]
         f /= delta * np.sum(np.abs(f))
         return f
 
-    def constant_filter_function(self, sigma: float, delta: float, NT: int):
+    def constant_filter_function(self, sigma: float, T: float, N: int):
         """Constant (flat) filter — f[t] = 1. sigma unused (kept for uniform signature)."""
-        MT = int(NT)
-        f = np.ones(2 * MT + 1)
+        delta = 2 * T / N
+        f = np.ones(N)
         f /= delta * np.sum(np.abs(f))
         return f
 
-    def super_gaussian_filter_function(self, sigma: float, delta: float, NT: int, n: int = 2):
-        """Freq-domain super-Gaussian: f̃(Ω) ∝ exp(-(|Ω|·sigma)^{2n}).
-        n=1: Gaussian; n=2: flat-topped; larger n → near-rectangular.
-        Time tails decay as exp(-c|t|^{2n/(2n-1)}), enabling accurate truncation at small NT.
-        n passed via params as 'SG_N' (default 2)."""
-        tlist     = np.arange(-NT, NT + 1)
-        tau       = tlist
-        N_fft     = max(4096, 32 * (2 * NT + 1))
-        omega_max = 6.0 / sigma
-        omega     = np.linspace(-omega_max, omega_max, N_fft)
-        dw        = omega[1] - omega[0]
-        f_tilde   = np.exp(-(np.abs(omega) * sigma) ** (2 * n))
-        f         = np.real(np.exp(1j * np.outer(tau, omega)) @ f_tilde) * dw / (2 * np.pi)
-        f        /= delta * np.sum(np.abs(f))
-        return f
+    # def super_gaussian_filter_function(self, sigma: float, delta: float, NT: int, n: int = 2):
+    #     """Freq-domain super-Gaussian: f̃(Ω) ∝ exp(-(|Ω|·sigma)^{2n}).
+    #     n=1: Gaussian; n=2: flat-topped; larger n → near-rectangular.
+    #     Time tails decay as exp(-c|t|^{2n/(2n-1)}), enabling accurate truncation at small NT.
+    #     n passed via params as 'SG_N' (default 2)."""
+    #     tlist     = np.arange(-NT, NT + 1)
+    #     tau       = tlist
+    #     N_fft     = max(4096, 32 * (2 * NT + 1))
+    #     omega_max = 6.0 / sigma
+    #     omega     = np.linspace(-omega_max, omega_max, N_fft)
+    #     dw        = omega[1] - omega[0]
+    #     f_tilde   = np.exp(-(np.abs(omega) * sigma) ** (2 * n))
+    #     f         = np.real(np.exp(1j * np.outer(tau, omega)) @ f_tilde) * dw / (2 * np.pi)
+    #     f        /= delta * np.sum(np.abs(f))
+    #     return f
 
     def fourier_filter_function(self, omega: float, flist, h: float, delta: float):
         """Fourier-transformed filter function."""
@@ -140,9 +144,10 @@ class GroundStateProtocol(Protocol):
         coupling_ops      : dict {bath_idx: op_string}, op_string in {'X', 'Y', 'Z'}
         params:
             Required:
-                T      : float — filter half-duration; delta = T/N, so N*delta = T exactly
-                         (full filter span = 2*T)
-                N      : float — number of filter layers (one-sided); MT = int(N)
+                T      : float — filter half-duration; delta = 2*T/N, so N*delta = 2*T
+                         exactly (full filter span = 2*T)
+                N      : int — full circuit length (number of filter layers); enforced
+                         integer, N*delta spans the full filter duration 2*T
                 h      : float — bath splitting
                 theta  : float — coupling strength
             Optional:
@@ -150,7 +155,7 @@ class GroundStateProtocol(Protocol):
                 SG_N   : int (default 2, super_gaussian only) — super-Gaussian order n
 
         T, N replace the old (delta, NT) pair as the independent scan variables:
-        delta (the Trotter step) is derived as delta = T/N, so T fixes the filter's
+        delta (the Trotter step) is derived as delta = 2*T/N, so T fixes the filter's
         physical half-duration (hence its frequency-domain width, ~1/T) while N controls
         the Trotter step size independently of that width -- see the T/N reparametrization
         discussion: scanning delta directly at fixed NT confounds filter width (~1/(NT*delta))
@@ -167,9 +172,8 @@ class GroundStateProtocol(Protocol):
 
         params = {**self.params, **(params or {})}
         T     = self.require_real(params, "T")
-        N     = self.require_real(params, "N")
-        delta = T / N
-        NT    = N
+        N     = self.require_int(params, "N")
+        delta = 2 * T / N
         h     = self.require_real(params, "h")
         sigma = self.require_real(params, "sigma", default=1.)
         theta = self.get_param(params, "theta")
@@ -177,8 +181,8 @@ class GroundStateProtocol(Protocol):
         filter_kwargs = {}
         if self.function == "super_gaussian":
             filter_kwargs['n'] = self.require_int(params, "SG_N", default=2)
-        filter_f = self.filter_function(sigma, delta, NT, **filter_kwargs)
-        MT       = len(filter_f) // 2
+        filter_f = self.filter_function(sigma, T, N, **filter_kwargs)
+        n_layers = len(filter_f)
 
         c_ops       = [u**delta for u in self._get_coupling_layer(coupling_geometry, coupling_ops, theta)]
         reset_layer = self._reset_layer
@@ -188,7 +192,7 @@ class GroundStateProtocol(Protocol):
         if self.trotter_order == 1:
             sys_ops  = [u**delta for u in self.model.get_system_layer(order=1)]
             bath_ops = [u**delta for u in self._get_bath_layer(h)]
-            for j in range(2 * MT + 1):
+            for j in range(n_layers):
                 cycle.append(sys_ops)
                 cycle.append(bath_ops)
                 cycle.append(u**filter_f[j] for u in c_ops)
@@ -199,13 +203,12 @@ class GroundStateProtocol(Protocol):
             sys_half  = [u**(delta / 2) for u in sys_layer]
             bath_half = [u**(delta / 2) for u in self._get_bath_layer(h)]
 
-            N = 2 * MT + 1
             cycle.append(sys_half)
-            for j in range(N):
+            for j in range(n_layers):
                 cycle.append(bath_half)
                 cycle.append(u**filter_f[j] for u in c_ops)
                 cycle.append(bath_half)
-                cycle.append(sys_full if j < N - 1 else sys_half)
+                cycle.append(sys_full if j < n_layers - 1 else sys_half)
 
         cycle.append(reset_layer)
 
