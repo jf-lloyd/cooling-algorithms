@@ -74,13 +74,13 @@ class GroundStateProtocol(Protocol):
     # is derived internally by each filter.
 
     def gaussian_filter_function(self, sigma: float, T: float, N: int):
-        """Gaussian filter — f[t] = exp(-(δt)²/(2σ²)). N must be odd (filter is
-        symmetric about t=0); f has length N exactly (N=5 -> t = -2..2)."""
-        if N % 2 == 0:
-            raise ValueError(f"N must be odd for the gaussian filter, got {N!r}")
+        """Gaussian filter — f[t] = exp(-(δt)²/(2σ²)). f has length N exactly,
+        centered symmetrically about t=0: integer-spaced (t=-M..M) for odd N,
+        half-integer-spaced (no sample exactly at t=0) for even N."""
         delta = 2 * T / N
         a = delta / sigma
-        f = [np.exp(-(a*t)**2 / 2) for t in np.arange(-N//2, N//2 + 1)]
+        tlist = np.arange(N) - (N - 1) / 2
+        f = np.exp(-(a * tlist) ** 2 / 2)
         f /= delta * np.sum(np.abs(f))
         return f
 
