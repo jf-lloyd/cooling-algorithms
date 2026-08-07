@@ -30,8 +30,10 @@ Two further findings:
   the single-qubit field. General rule for `C` non-commuting 2-body colour classes:
   overhead = `max(1, (2C-2)/C)` — Ising `C=1` free, 1D `C=2` free, 2D Heisenberg `C=4` → 1.5×
   (measured 1.6× by exact ED).
-- **Variational compression is a high-temperature tool.** Past β≈2 the optimisation hits a barren
-  plateau (more depth, worse fidelity); use plain 2nd-order Trotter there.
+- **Variational compression is a high-temperature tool.** Past β≈2 the optimiser (Adam, Trotter warm
+  start + perturbed restarts) stalls at its Trotter initialisation at the relevant depths: never worse than
+  2nd-order Trotter (by construction), but no gain over it. Incremental-identity initialisation is untested
+  there; use plain 2nd-order Trotter at low temperature.
 
 ---
 

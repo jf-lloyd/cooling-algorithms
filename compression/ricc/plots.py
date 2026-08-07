@@ -31,8 +31,8 @@ def gates_to_target(d, key, Gg, target=0.01):
     """2q-gates needed to first reach `target` infidelity (log-linear interpolation).
 
     Returns np.nan if the curve never gets there. Uses the FIRST crossing and
-    requires the curve to be descending into it, so a non-monotonic (barren-
-    plateau) variational curve cannot report a spuriously good number.
+    requires the curve to be descending into it, so a variational curve that
+    stalled at its Trotter initialisation cannot report a spuriously good number.
     """
     g, e = _curve(d, key, Gg)
     below = np.where(e <= target)[0]
@@ -117,7 +117,12 @@ def plot_trotter_order_rule(ax):
 
 # ---------------------------------------------------------------- plot 3
 def plot_beta_sweep(ax, target=0.01):
-    """Gates-to-1% vs beta for 2nd-order and variational; shows the barren plateau."""
+    """Gates-to-1% vs beta for 2nd-order and variational.
+
+    At beta >= 2 the optimiser returns its Trotter initialisation unchanged (the recorded
+    variational values equal the Trotter ones exactly), so it never beats Trotter there;
+    those points are marked rather than plotted as a variational win.
+    """
     b = load("cc_cycle_beta_var.json")
     d3 = load("cc_trot_3x4.json")
     Gg = d3["Gg"]
@@ -136,7 +141,7 @@ def plot_beta_sweep(ax, target=0.01):
     for i in bad:
         ax.plot(x[i], g_t2[i], "x", color=CV, ms=11, mew=2.5)
     if bad:
-        ax.annotate("variational fails\n(barren plateau)", (x[bad[0]], g_t2[bad[0]]),
+        ax.annotate("variational stalls at its\nTrotter init (no gain)", (x[bad[0]], g_t2[bad[0]]),
                     textcoords="offset points", xytext=(-12, 26), fontsize=8, color=CV,
                     ha="center", arrowprops=dict(arrowstyle="->", color=CV, lw=1.2))
 
