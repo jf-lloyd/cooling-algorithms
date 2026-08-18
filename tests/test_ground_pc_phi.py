@@ -134,3 +134,21 @@ c5_m=ev_(rmix,OP({0:PX,5:PX}))-ev_(rmix,OP({0:PX}))*ev_(rmix,OP({5:PX}))
 print(f"   能量  (P-偶): {E_p:+.6f} -> {E_m:+.6f}   {'不变 OK' if abs(E_p-E_m)<1e-9 else 'FAIL'}")
 print(f"   <X_0> (P-奇): {x_p:+.6f} -> {x_m:+.6f}   {'归零 OK' if abs(x_m)<1e-9 else 'FAIL'}")
 print(f"   C(5)        : {c5_p:+.6f} -> {c5_m:+.6f}   {'长程恢复 OK' if abs(c5_m)>0.5 else 'FAIL'}")
+
+
+print()
+print("T7  扇区必须按轨迹固定, 不能按 cycle 翻")
+sc=cooling.Randomized(pr,coupling_geometry=geo,n_cache=1,seed=3,allowed_ops=["iSWAP"],
+                      randomize_sector=True)
+seqs=[]
+for traj in range(6):
+    seqs.append([id(sc.circuit_fn(t)) for t in range(1,6)])   # 每条轨迹 5 个 cycle
+const=all(len(set(s))==1 for s in seqs)
+firsts=[s[0] for s in seqs]
+alternating=all(firsts[i]!=firsts[i+1] for i in range(len(firsts)-1))
+balanced=len(set(firsts))==2 and firsts.count(firsts[0])==3
+print(f"   单条轨迹内电路恒定: {const}   逐轨迹交替: {alternating}   6 条恰好 3+3: {balanced}   "
+      f"{'OK' if const and alternating and balanced else 'FAIL'}")
+sc2=cooling.Randomized(pr,coupling_geometry=geo,n_cache=1,seed=3,allowed_ops=["iSWAP"])
+print(f"   关闭时行为不变 (cache 大小 {len(sc2._cache)}, 每 cycle 抽): "
+      f"{'OK' if len(sc2._cache)==1 else 'FAIL'}")

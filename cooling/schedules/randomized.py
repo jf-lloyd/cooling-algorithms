@@ -59,7 +59,22 @@ class Randomized(Schedule):
         # connected correlator: in a single sector it is a difference of two large numbers
         # and comes out short-ranged, whereas after randomisation it equals the full
         # correlator and reads out the classical long-range order directly.
+        #
+        # Sectors ALTERNATE across trajectories rather than being drawn at random. Random
+        # draws leave a sector imbalance u with E[u^2] = 1/K, and since the residual <X_i>
+        # are perfectly correlated across sites, that imbalance feeds a systematic 1/K bias
+        # into the disconnected part and hence into C(d). Alternating is the antithetic
+        # version: for an even number of trajectories the imbalance is exactly zero, the
+        # order parameter cancels to machine precision and the bias vanishes identically.
+        #
+        # The sector is fixed ONCE PER TRAJECTORY, not per cycle. Flipping it every cycle
+        # would instead prepare the fixed point of the averaged channel (Phi_+ + Phi_-)/2,
+        # which is a different and much worse state: the pump keeps reversing and drags the
+        # system back and forth (measured at L=6, phi=50 deg: ground-manifold weight 0.61
+        # and C(5) = -0.29, against 0.98 and -0.79 for the intended mixture of fixed points).
         self.randomize_sector = randomize_sector
+        self._sector = 0
+        self._traj_count = 0
         if randomize_sector and abs(float(protocol.params.get("phi", 0.))) < 1e-12:
             raise ValueError(
                 "randomize_sector=True requires a non-zero 'phi' in the protocol params; "
@@ -199,6 +214,10 @@ class Randomized(Schedule):
             for fc in self._cache:
                 fc._is_parameterized_ = _false
 
+    def reset_sector_counter(self):
+        """Restart the trajectory alternation (call before an independent batch)."""
+        self._traj_count = 0
+
     def _sector_signs(self):
         """Params overrides to append per configuration: one entry normally, both frame
         signs when randomize_sector is on (so the cache is exactly balanced even at
@@ -223,4 +242,12 @@ class Randomized(Schedule):
     def circuit_fn(self, t: int) -> cirq.FrozenCircuit:
         if self.resample is not None and t % self.resample == 0:
             self.build_cache(_warn=False)
-        return self._cache[self._rng.integers(len(self._cache))]
+        if not self.randomize_sector:
+            return self._cache[self._rng.integers(len(self._cache))]
+        # Simulation.run restarts the step counter at t = 1 for every trajectory, so that
+        # is where a new sector is drawn; it is then held for the rest of the trajectory.
+        if t <= 1:
+            self._sector = self._traj_count % 2
+            self._traj_count += 1
+        n_cfg = len(self._cache) // 2
+        return self._cache[2 * int(self._rng.integers(n_cfg)) + self._sector]
