@@ -30,8 +30,13 @@ Two further findings:
   the single-qubit field. General rule for `C` non-commuting 2-body colour classes:
   overhead = `max(1, (2C-2)/C)` — Ising `C=1` free, 1D `C=2` free, 2D Heisenberg `C=4` → 1.5×
   (measured 1.6× by exact ED).
-- **Variational compression is a high-temperature tool.** Past β≈2 the optimisation hits a barren
-  plateau (more depth, worse fidelity); use plain 2nd-order Trotter there.
+- **Variational compression pays off at shallow depth; past k~13 the optimiser stops improving.**
+  With Adam warm-started from the coarse Trotter angles, every observed gain is at k <= 13 layers
+  (2.3-10.8x better than Trotter at the same depth) and every stall at k >= 14 (~250 gates, ~56 free
+  parameters), where the run returns its initialisation *unchanged* -- never worse than Trotter by
+  construction, but no gain. The stalls happen to be the beta >= 2 runs, but beta <= 1 was never tested
+  above k=13, so **this data cannot separate a depth/parameter-count limit from a temperature limit**
+  (test pending: beta=1 at k=16,20). Incremental-identity initialisation is untested in either case.
 
 ---
 
