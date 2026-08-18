@@ -2,12 +2,12 @@ from .lattices import Lattice, ChainLattice1D, SquareLattice2D, TriangularLattic
 from .device import CoolingDevice
 from .models import Model, IsingModel, HeisenbergModel, XYModel
 try:
-    from .ed import ModelSpec, ThermalEnergy
+    from .ed import ModelSpec, ThermalEnergy, SpinObservables, SpinSpinCorrelators
 except ImportError:
     pass
 from .protocols import Protocol, DetailedBalanceProtocol, GroundStateProtocol
 from .measurements import Measurement, DefaultMeasurement1, DefaultMeasurement2, DefaultMeasurement3
 from .simulation import Simulation
 from .gates import YXPowGate, ZXPowGate
-from .noise import BasicNoiseModel
+from .noise import BasicNoiseModel, BathAmplitudeDampingNoiseModel
 from .schedules import Schedule, Randomized, SimpleRandomized, RandomPauliSchedule
