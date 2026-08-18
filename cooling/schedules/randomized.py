@@ -38,7 +38,7 @@ class Randomized(Schedule):
 
     def __init__(self, protocol, coupling_geometry=None, coupling_ops=None,
                  allowed_ops=None, n_cache: int = 50, resample=None,
-                 resample_trajectories: bool = False,
+                 resample_trajectories: bool = False, randomize_sector: bool = False,
                  parameterized: bool = False, seed=None, compile: bool = True):
 
         super().__init__(protocol)
@@ -50,6 +50,20 @@ class Randomized(Schedule):
             raise ValueError(f"resample must be a positive integer, got {resample!r}.")
         self.resample              = resample
         self.resample_trajectories = resample_trajectories
+        # Randomise the frame sign (phi -> -phi) over the two symmetry-broken sectors.
+        # phi -> -phi is the sublattice flip, and the resulting channel is the original one
+        # conjugated by the Z2 operator P = prod(Z), so the two steady states are rho and
+        # P rho P. Averaging them restores the symmetry: every P-even expectation value
+        # (energy, all even-point correlators, the ground-manifold weight) is untouched,
+        # while P-odd ones (the order parameter <X_i>) average to zero. The point is the
+        # connected correlator: in a single sector it is a difference of two large numbers
+        # and comes out short-ranged, whereas after randomisation it equals the full
+        # correlator and reads out the classical long-range order directly.
+        self.randomize_sector = randomize_sector
+        if randomize_sector and abs(float(protocol.params.get("phi", 0.))) < 1e-12:
+            raise ValueError(
+                "randomize_sector=True requires a non-zero 'phi' in the protocol params; "
+                "at phi = 0 the two sectors give the same circuit.")
         if n_cache > 200:
             print("Warning: large cache size may reduce simulation efficiency! "
                   "Suggested n_cache <= 100 and periodic resampling.")
@@ -85,6 +99,10 @@ class Randomized(Schedule):
 
         For n_possible < 1000: enumerates all configs and samples without replacement.
         Otherwise: frozenset rejection sampling (collision rate negligible for n_cache << n_possible).
+
+        With randomize_sector=True each configuration is cached twice, once per frame
+        sign, so the cache holds 2 * effective_n circuits and circuit_fn's uniform draw
+        yields a balanced mixture of the two symmetry-broken sectors.
 
         Random geometry (coupling_geometry=None):
             If Nb <= Ns, geometries are random Nb-subsets of system qubits
@@ -138,8 +156,10 @@ class Randomized(Schedule):
             selected_idx = rng.choice(len(all_configs), size=effective_n, replace=False)
             for idx in selected_idx:
                 geom_tuple, ops_tuple = all_configs[idx]
-                self._cache.append(self.protocol.channel(
-                    dict(enumerate(geom_tuple)), dict(enumerate(ops_tuple)), compile=self.compile))
+                for sgn in self._sector_signs():
+                    self._cache.append(self.protocol.channel(
+                        dict(enumerate(geom_tuple)), dict(enumerate(ops_tuple)),
+                        params=sgn, compile=self.compile))
         else:
             # Rejection sampling — collisions rare when n_cache << n_possible
             expected_extra = effective_n ** 2 / (2 * n_possible)
@@ -169,7 +189,9 @@ class Randomized(Schedule):
                 ))
                 if key not in seen:
                     seen.add(key)
-                    self._cache.append(self.protocol.channel(geometry, coupling_ops, compile=self.compile))
+                    for sgn in self._sector_signs():
+                        self._cache.append(self.protocol.channel(
+                            geometry, coupling_ops, params=sgn, compile=self.compile))
 
         if not self.parameterized:
             # Circuits are concrete (no sympy): tell cirq/qsim so they skip the
@@ -177,15 +199,26 @@ class Randomized(Schedule):
             for fc in self._cache:
                 fc._is_parameterized_ = _false
 
+    def _sector_signs(self):
+        """Params overrides to append per configuration: one entry normally, both frame
+        signs when randomize_sector is on (so the cache is exactly balanced even at
+        n_cache = 1, and circuit_fn's uniform draw gives a 50/50 sector mixture)."""
+        if not self.randomize_sector:
+            return [None]
+        phi = float(self.protocol.params["phi"])
+        return [{"phi": phi}, {"phi": -phi}]
+
     @property
     def sim_options(self) -> dict:
         return {'n_cache': self.cache_size,
-                'resample_trajectories': self.resample_trajectories}
+                'resample_trajectories': self.resample_trajectories,
+                'randomize_sector': self.randomize_sector}
 
     @property
     def fname(self) -> str:
         Nb = self.protocol.device.Nb
-        return f"{self.protocol.model.name}_Nb{Nb}_{self.protocol.name}_rand"
+        tag = "_randsec" if self.randomize_sector else ""
+        return f"{self.protocol.model.name}_Nb{Nb}_{self.protocol.name}_rand{tag}"
 
     def circuit_fn(self, t: int) -> cirq.FrozenCircuit:
         if self.resample is not None and t % self.resample == 0:

@@ -86,3 +86,51 @@ P=float(np.real(E0v.conj()@rho@E0v+E1v.conj()@rho@E1v))
 fb=max(float(np.real(PSIP.conj()@rho@PSIP)),float(np.real(PSIM.conj()@rho@PSIM)))
 print(f"   P_gs={P:.4f}  F_brk={fb:.4f}  E rel={(E-ev[0])/abs(ev[0])*100:.2f}%  "
       f"{'OK' if abs(P-0.9829)<0.002 and abs(fb-0.9826)<0.002 else 'FAIL'}")
+
+
+# ---------------------------------------------------------------- sector randomisation
+print()
+print("T5  randomize_sector: cache 平衡 / 参数校验")
+lat=cooling.ChainLattice1D(NS,pbc=False); dev=cooling.CoolingDevice.from_lattice(lat,Nb=NB)
+mod=cooling.IsingModel(dev,{"J":1.0,"g":0.5,"gx":0.0})
+par={"T":0.5,"N":3,"h":2.0,"theta":1.1,"phi":np.radians(50)}
+pr=cooling.GroundStateProtocol(dev,mod,params=par,function="constant",noise_model=None,
+                               trotter_order=1,allow_iSWAP=True)
+geo={k:k%NS for k in range(NB)}
+sc0=cooling.Randomized(pr,coupling_geometry=geo,n_cache=1,seed=1,allowed_ops=["iSWAP"])
+sc1=cooling.Randomized(pr,coupling_geometry=geo,n_cache=1,seed=1,allowed_ops=["iSWAP"],
+                       randomize_sector=True)
+print(f"   n_cache=1: 关 -> {len(sc0._cache)} 个电路, 开 -> {len(sc1._cache)} 个  "
+      f"{'OK' if len(sc0._cache)==1 and len(sc1._cache)==2 else 'FAIL'}")
+try:
+    pr0=cooling.GroundStateProtocol(dev,mod,params={k:v for k,v in par.items() if k!="phi"},
+        function="constant",noise_model=None,trotter_order=1,allow_iSWAP=True)
+    cooling.Randomized(pr0,coupling_geometry=geo,n_cache=1,seed=1,allowed_ops=["iSWAP"],
+                       randomize_sector=True)
+    print("   phi=0 时未报错  FAIL")
+except ValueError as e:
+    print(f"   phi=0 正确报错 -> {str(e)[:56]}...")
+
+print("T6  随机化恢复长程连通关联 (P-偶量不变, P-奇量归零)")
+def fixed_point(circ):
+    uni=cirq.Circuit(o for m in circ for o in m if not isinstance(o.gate,(cirq.ResetChannel,cirq.IdentityGate)))
+    U=uni.unitary(qubit_order=list(dev.system_qubits)+list(dev.bath_qubits))
+    DS=DB=2**NS
+    K=np.ascontiguousarray(U.reshape(DS,DB,DS,DB)[:,:,:,0].transpose(1,0,2))
+    Kd=K.conj().transpose(0,2,1); rho=np.eye(DS,dtype=complex)/DS; Ep=None
+    for _ in range(6000):
+        rho=np.einsum('jab,bc,jcd->ad',K,rho,Kd,optimize=True)
+        E=float(np.real(np.trace(rho@H0)))
+        if Ep is not None and abs(E-Ep)<1e-12: break
+        Ep=E
+    return rho
+rp,rm=(fixed_point(c) for c in sc1._cache)
+rmix=(rp+rm)/2
+ev_=lambda r,A: float(np.real(np.trace(r@A)))
+E_p,E_m=ev_(rp,H0),ev_(rmix,H0)
+x_p,x_m=ev_(rp,OP({0:PX})),ev_(rmix,OP({0:PX}))
+c5_p=ev_(rp,OP({0:PX,5:PX}))-ev_(rp,OP({0:PX}))*ev_(rp,OP({5:PX}))
+c5_m=ev_(rmix,OP({0:PX,5:PX}))-ev_(rmix,OP({0:PX}))*ev_(rmix,OP({5:PX}))
+print(f"   能量  (P-偶): {E_p:+.6f} -> {E_m:+.6f}   {'不变 OK' if abs(E_p-E_m)<1e-9 else 'FAIL'}")
+print(f"   <X_0> (P-奇): {x_p:+.6f} -> {x_m:+.6f}   {'归零 OK' if abs(x_m)<1e-9 else 'FAIL'}")
+print(f"   C(5)        : {c5_p:+.6f} -> {c5_m:+.6f}   {'长程恢复 OK' if abs(c5_m)>0.5 else 'FAIL'}")
