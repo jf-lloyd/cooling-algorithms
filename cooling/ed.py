@@ -298,3 +298,104 @@ def ThermalEnergy(model, beta=None, k=10, **spec_kwargs):
     weights = np.exp(-beta * (energies - energies.min()))
     weights /= weights.sum()
     return energies[:k], np.dot(energies, weights)
+
+
+def _ensemble_weights(E, beta):
+    """
+    Weights over eigenstates: Boltzmann at inverse temperature beta
+    (numerically stable for any sign/magnitude), or the ground-state
+    projector if beta is None.
+    """
+    if beta is None:
+        weights = np.zeros_like(E, dtype=float)
+        weights[np.argmin(E)] = 1.
+        return weights
+    shift = E.min() if beta >= 0 else E.max()
+    weights = np.exp(-beta * (E - shift))
+    weights /= weights.sum()
+    return weights
+
+
+def _op_expectation(basis, op, sites, V, weights, kw):
+    """Ensemble expectation <O> of a Pauli string op (e.g. 'x', 'xx') acting
+    on the given site(s), from its diagonal matrix elements in the H eigenbasis."""
+    mat = hamiltonian([[op, [[1.0, *sites]]]], [], basis=basis, **kw).toarray()
+    exp_vals = np.real(np.einsum('in,ij,jn->n', V.conj(), mat, V))
+    return float(np.dot(exp_vals, weights))
+
+
+def _is_fully_periodic(model):
+    """True if every extended dimension of model.lattice is periodic (so a
+    single reference site suffices for two-point functions by translation
+    invariance)."""
+    Lx, Ly, pbc_x, pbc_y = _lattice_geometry(model.lattice)
+    return bool(pbc_x) and (Ly == 1 or bool(pbc_y))
+
+
+def _ed_eigensystem(model):
+    """Full ED (no symmetry reduction -- eigenvectors are needed, not just the
+    spectrum). Returns (basis, E, V, kw)."""
+    Ns = model.Ns
+    basis = spin_basis_general(Ns, pauli=True)
+    kw = dict(dtype=np.complex128, check_herm=False, check_symm=False, check_pcon=False)
+    H, _ = _build_H(model, basis)
+    E, V = H.eigh()
+    return basis, E, V, kw
+
+
+def SpinObservables(model, beta=None, ops=('X', 'Y', 'Z')):
+    """
+    Single-site expectation values <O_i> in the thermal (Gibbs) state at
+    inverse temperature beta, or in the ground state if beta is None.
+
+    ops: iterable of single-character Pauli labels, e.g. ('X', 'Y', 'Z').
+
+    Returns {op: array of shape (Ns,)}, one value per site.
+
+    """
+    basis, E, V, kw = _ed_eigensystem(model)
+    weights = _ensemble_weights(E, beta)
+    return {
+        op: np.array([_op_expectation(basis, op.lower(), (i,), V, weights, kw)
+                      for i in range(model.Ns)])
+        for op in ops
+    }
+
+
+def SpinSpinCorrelators(model, beta=None, ops=('XX', 'YY', 'ZZ'), connected=False):
+    """
+    Two-point correlators <O_i O_j> in the thermal (Gibbs) state at inverse
+    temperature beta, or in the ground state if beta is None.
+
+    Computed for every pair i < j -- or, if model.lattice is fully periodic only pairs with i=0.
+
+    ops: iterable of two-character Pauli strings, e.g. ('XX', 'YY', 'ZZ').
+         Mixed strings like 'XY' are also accepted (order is O_i then O_j).
+    connected: if True, return <O_i O_j> - <O_i><O_j>.
+
+    Returns {op: {(i, j): value}}.
+    """
+    Ns = model.Ns
+    basis, E, V, kw = _ed_eigensystem(model)
+    weights = _ensemble_weights(E, beta)
+
+    pairs = ([(0, j) for j in range(1, Ns)] if _is_fully_periodic(model)
+             else [(i, j) for i in range(Ns) for j in range(i + 1, Ns)])
+
+    local_cache = {}
+    def local(op_char, i):
+        key = (op_char, i)
+        if key not in local_cache:
+            local_cache[key] = _op_expectation(basis, op_char.lower(), (i,), V, weights, kw)
+        return local_cache[key]
+
+    result = {}
+    for op in ops:
+        vals = {}
+        for i, j in pairs:
+            val = _op_expectation(basis, op.lower(), (i, j), V, weights, kw)
+            if connected:
+                val -= local(op[0], i) * local(op[1], j)
+            vals[(i, j)] = val
+        result[op] = vals
+    return result
