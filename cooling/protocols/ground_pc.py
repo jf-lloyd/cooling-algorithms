@@ -7,6 +7,65 @@ import numpy as np
 import cirq
 from .protocolbase import Protocol
 
+
+def _sublattice_signs(lattice, Ns):
+    """s_i = +/-1 from a 2-colouring of the bond graph (BFS). Raises if not bipartite."""
+    adj = {i: [] for i in range(Ns)}
+    for a, b in lattice.nearest_neighbour_pairs():
+        adj[a].append(b); adj[b].append(a)
+    col = {}
+    for root in range(Ns):
+        if root in col: continue
+        col[root] = 0; stack = [root]
+        while stack:
+            u = stack.pop()
+            for v in adj[u]:
+                if v not in col:
+                    col[v] = 1 - col[u]; stack.append(v)
+                elif col[v] == col[u]:
+                    raise ValueError(
+                        "Lattice is not bipartite (odd cycle through sites "
+                        f"{u},{v}); a staggered frame (phi != 0) is undefined. "
+                        "Note e.g. an odd-by-odd periodic square lattice is NOT bipartite.")
+    return [1 if col[i] == 0 else -1 for i in range(Ns)]
+
+
+def _frame_rotation(phi, sign=1):
+    """R = exp(-i * sign * (phi/2) Y): rotates the quantisation axis to
+    cos(phi) z + sign*sin(phi) x."""
+    c, s = np.cos(sign * phi / 2), np.sin(sign * phi / 2)
+    return np.array([[c, -s], [s, c]], dtype=complex)
+
+
+class _FramedGate(cirq.Gate):
+    """A gate conjugated by a fixed local basis change, U -> R U R^dag.
+
+    Powers commute with conjugation, (R U R^dag)^t = R U^t R^dag, so this stays a
+    drop-in replacement wherever the protocol writes ``gate ** delta``.
+    """
+
+    def __init__(self, base: cirq.Gate, rot: np.ndarray):
+        self._base, self._rot = base, rot
+
+    def _num_qubits_(self):
+        return cirq.num_qubits(self._base)
+
+    def _unitary_(self):
+        u = cirq.unitary(self._base)
+        return self._rot @ u @ self._rot.conj().T
+
+    def __pow__(self, t):
+        b = self._base ** t
+        return NotImplemented if b is NotImplemented else _FramedGate(b, self._rot)
+
+    def _circuit_diagram_info_(self, args):
+        n = cirq.num_qubits(self._base)
+        return cirq.CircuitDiagramInfo(wire_symbols=tuple(f"F[{self._base}]" for _ in range(n)))
+
+    def __repr__(self):
+        return f"_FramedGate({self._base!r})"
+
+
 class GroundStateProtocol(Protocol):
 
     """
@@ -50,10 +109,18 @@ class GroundStateProtocol(Protocol):
         )
 
     @property
+    def sublattice_signs(self):
+        """s_i = +/-1 per system site, from a 2-colouring of the bond graph (cached).
+        Flipping all signs selects the other Neel sector."""
+        if getattr(self, "_sub_signs", None) is None:
+            self._sub_signs = _sublattice_signs(self.model.lattice, self.device.Ns)
+        return self._sub_signs
+
+    @property
     def name(self):
         p = self.params
         parts = []
-        for key, fmt in [('T', 'T{:.4f}'), ('N', 'N{:.0f}'), ('h', 'h{:.2f}'), ('sigma', 's{:.3f}'), ('theta', 'th{:.3f}')]:
+        for key, fmt in [('T', 'T{:.4f}'), ('N', 'N{:.0f}'), ('h', 'h{:.2f}'), ('sigma', 's{:.3f}'), ('theta', 'th{:.3f}'), ('phi', 'phi{:.3f}')]:
             if key in p:
                 parts.append(fmt.format(p[key]))
         p2 = getattr(self.noise_model, 'p2', 0.)
@@ -115,20 +182,36 @@ class GroundStateProtocol(Protocol):
 
     # ── Circuit building helpers ──────────────────────────────────────────────
 
-    def _get_bath_layer(self, h: float):
-        """Uniform Zeeman splitting on bath qubits. cirq: rz(-h) = exp(ih/2 Z)."""
-        return [cirq.rz(-h)(b) for b in self.device.bath_qubits]
+    def _get_bath_layer(self, h: float, phi: float = 0.0):
+        """Uniform Zeeman splitting on the bath qubits, quantised along the frame axis
+        cos(phi) z + sin(phi) x. cirq: rz(-h) = exp(ih/2 Z); phi = 0 is the original gate."""
+        if abs(phi) < 1e-12:
+            return [cirq.rz(-h)(b) for b in self.device.bath_qubits]
+        R = _frame_rotation(phi)
+        return [_FramedGate(cirq.rz(-h), R)(b) for b in self.device.bath_qubits]
 
-    def _get_coupling_layer(self, coupling_geometry: dict, coupling_ops: dict, theta: float):
+    def _get_coupling_layer(self, coupling_geometry: dict, coupling_ops: dict, theta: float, phi: float = 0.0):
         """
         Coupling gates for all system-bath pairs.
         coupling_ops : {bath_idx: op_string} — 'X', 'Y', 'Z' per bath qubit.
         exponent = 2*theta/π so that gate**delta**f[j] → exp(-i·theta·delta·f[j]·OP).
+        phi rotates each site's extraction axis to cos(phi) z + s_i sin(phi) x, with the
+        sublattice sign s_i taken from a 2-colouring of the bond graph, so that the pumped
+        quantity is the staggered order parameter rather than the total z magnetisation.
+        The conjugation is single-qubit only: the compiled two-qubit gate count is unchanged.
         """
         S  = self.device.system_qubits
         B  = self.device.bath_qubits
         sb = self.coupling_gates(coupling_ops)
-        return [sb[bi](exponent=2 / np.pi * theta)(S[si], B[bi]) for bi, si in coupling_geometry.items()]
+        if abs(phi) < 1e-12:
+            return [sb[bi](exponent=2 / np.pi * theta)(S[si], B[bi]) for bi, si in coupling_geometry.items()]
+        signs = self.sublattice_signs
+        Rb = _frame_rotation(phi)
+        ops = []
+        for bi, si in coupling_geometry.items():
+            RR = np.kron(_frame_rotation(phi, signs[si]), Rb)
+            ops.append(_FramedGate(sb[bi](exponent=2 / np.pi * theta), RR)(S[si], B[bi]))
+        return ops
 
     @staticmethod
     def _gate_count(circuit: cirq.Circuit) -> int:
@@ -150,6 +233,14 @@ class GroundStateProtocol(Protocol):
                          integer, N*delta spans the full filter duration 2*T
                 h      : float — bath splitting
                 theta  : float — coupling strength
+            Optional:
+                phi    : float (default 0) — frame angle in radians. The extraction axis on
+                         system site i becomes cos(phi) z + s_i sin(phi) x with s_i the
+                         sublattice sign; the bath field and reset basis are co-rotated.
+                         phi = 0 reproduces the original protocol gate for gate. Built from
+                         single-qubit rotations only, so the two-qubit gate count is unchanged.
+                         Useful in symmetry-broken phases, where pumping along the local order
+                         parameter rather than along z is what the dissipator should do.
             Optional:
                 sigma  : float (default 1.) — filter time-domain width (continuous time)
                 SG_N   : int (default 2, super_gaussian only) — super-Gaussian order n
@@ -175,6 +266,7 @@ class GroundStateProtocol(Protocol):
         N     = self.require_int(params, "N")
         delta = 2 * T / N
         h     = self.require_real(params, "h")
+        phi   = self.require_real(params, "phi", default=0.)
         sigma = self.require_real(params, "sigma", default=1.)
         theta = self.get_param(params, "theta")
 
@@ -184,14 +276,20 @@ class GroundStateProtocol(Protocol):
         filter_f = self.filter_function(sigma, T, N, **filter_kwargs)
         n_layers = len(filter_f)
 
-        c_ops       = [u**delta for u in self._get_coupling_layer(coupling_geometry, coupling_ops, theta)]
+        c_ops       = [u**delta for u in self._get_coupling_layer(coupling_geometry, coupling_ops, theta, phi)]
         reset_layer = self._reset_layer
 
         cycle = cirq.Circuit()
+        if abs(phi) > 1e-12:
+            # Prepare the bath in the ground state of the tilted field. This is done at the
+            # START of the cycle (not after the reset) so that the bath is left in a definite
+            # computational state, which Simulation.get_system_state requires.
+            Rb = _frame_rotation(phi)
+            cycle.append([cirq.MatrixGate(Rb)(b) for b in self.device.bath_qubits])
 
         if self.trotter_order == 1:
             sys_ops  = [u**delta for u in self.model.get_system_layer(order=1)]
-            bath_ops = [u**delta for u in self._get_bath_layer(h)]
+            bath_ops = [u**delta for u in self._get_bath_layer(h, phi)]
             for j in range(n_layers):
                 cycle.append(sys_ops)
                 cycle.append(bath_ops)
@@ -201,7 +299,7 @@ class GroundStateProtocol(Protocol):
             sys_layer = self.model.get_system_layer(order=2)
             sys_full  = [u**delta       for u in sys_layer]
             sys_half  = [u**(delta / 2) for u in sys_layer]
-            bath_half = [u**(delta / 2) for u in self._get_bath_layer(h)]
+            bath_half = [u**(delta / 2) for u in self._get_bath_layer(h, phi)]
 
             cycle.append(sys_half)
             for j in range(n_layers):
