@@ -157,3 +157,41 @@ class CachedBitFlipChannel(cirq.Gate):
 
     def __repr__(self):
         return f"CachedBitFlipChannel(p={self.p!r})"
+
+
+def _amplitude_damping_kraus(gamma: float):
+    """Kraus operators for amplitude damping (relaxation |1> -> |0>)."""
+    return (
+        np.array([[1.0, 0.0], [0.0, np.sqrt(1.0 - gamma)]], dtype=np.complex128),
+        np.array([[0.0, np.sqrt(gamma)], [0.0, 0.0]], dtype=np.complex128),
+    )
+
+
+class CachedAmplitudeDampingChannel(cirq.Gate):
+    """
+    Amplitude damping channel with precomputed, cached Kraus operators.
+
+    Equivalent to cirq.amplitude_damp(gamma) — relaxation towards |0> with
+    probability gamma — but _kraus_ returns a precomputed tuple instead of
+    rebuilding the matrices on every call. Unlike the depolarizing/bit-flip
+    channels this is a genuine (non-unital) channel, so it exposes _kraus_
+    rather than _mixture_.
+    """
+
+    def __init__(self, gamma: float):
+        if not (0.0 <= gamma <= 1.0):
+            raise ValueError(f"gamma must be in [0, 1], got {gamma}")
+        self.gamma = float(gamma)
+        self._kr = _amplitude_damping_kraus(self.gamma)
+
+    def _num_qubits_(self) -> int:
+        return 1
+
+    def _kraus_(self):
+        return self._kr
+
+    def _circuit_diagram_info_(self, args):
+        return cirq.CircuitDiagramInfo(wire_symbols=(f"AD({self.gamma:.2g})",))
+
+    def __repr__(self):
+        return f"CachedAmplitudeDampingChannel(gamma={self.gamma!r})"
