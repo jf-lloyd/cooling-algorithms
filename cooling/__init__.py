@@ -5,7 +5,7 @@ try:
     from .ed import ModelSpec, ThermalEnergy, SpinObservables, SpinSpinCorrelators
 except ImportError:
     pass
-from .protocols import Protocol, DetailedBalanceProtocol, GroundStateProtocol
+from .protocols import Protocol, DetailedBalanceProtocol, GroundStateProtocol, TiltedGroundStateProtocol
 from .measurements import Measurement, DefaultMeasurement1, DefaultMeasurement2, DefaultMeasurement3
 from .simulation import Simulation
 from .gates import YXPowGate, ZXPowGate

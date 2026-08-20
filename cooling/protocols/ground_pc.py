@@ -49,11 +49,17 @@ class GroundStateProtocol(Protocol):
             else {k: v for k, v in Protocol._COUPLING_GATE_MAP.items() if k != 'iSWAP'}
         )
 
+    # (param key, format) pairs used to build `name`, in order. Subclasses that add
+    # params extend this so their values land in the filename (see
+    # TiltedGroundStateProtocol).
+    _NAME_KEYS = [('T', 'T{:.4f}'), ('N', 'N{:.0f}'), ('h', 'h{:.2f}'),
+                  ('sigma', 's{:.3f}'), ('theta', 'th{:.3f}')]
+
     @property
     def name(self):
         p = self.params
         parts = []
-        for key, fmt in [('T', 'T{:.4f}'), ('N', 'N{:.0f}'), ('h', 'h{:.2f}'), ('sigma', 's{:.3f}'), ('theta', 'th{:.3f}')]:
+        for key, fmt in self._NAME_KEYS:
             if key in p:
                 parts.append(fmt.format(p[key]))
         p2 = getattr(self.noise_model, 'p2', 0.)
@@ -114,12 +120,23 @@ class GroundStateProtocol(Protocol):
         return np.sum([flist[t] * np.exp(1j * (h - omega) * delta * tlist[t]) for t in range(n)])
 
     # ── Circuit building helpers ──────────────────────────────────────────────
+    #
+    # The three methods below are the extension points used by subclasses that
+    # need to alter the gates or prepend content to a cycle (see
+    # TiltedGroundStateProtocol). Each receives the *resolved* params dict --
+    # self.params merged with any per-call override passed to channel() -- so a
+    # subclass sees per-call overrides rather than only the constructor values.
 
-    def _get_bath_layer(self, h: float):
+    def _pre_cycle_layer(self, params: dict):
+        """Operations prepended once at the start of each cycle. Empty by default."""
+        return []
+
+    def _get_bath_layer(self, h: float, params: dict = None):
         """Uniform Zeeman splitting on bath qubits. cirq: rz(-h) = exp(ih/2 Z)."""
         return [cirq.rz(-h)(b) for b in self.device.bath_qubits]
 
-    def _get_coupling_layer(self, coupling_geometry: dict, coupling_ops: dict, theta: float):
+    def _get_coupling_layer(self, coupling_geometry: dict, coupling_ops: dict, theta: float,
+                            params: dict = None):
         """
         Coupling gates for all system-bath pairs.
         coupling_ops : {bath_idx: op_string} — 'X', 'Y', 'Z' per bath qubit.
@@ -184,14 +201,15 @@ class GroundStateProtocol(Protocol):
         filter_f = self.filter_function(sigma, T, N, **filter_kwargs)
         n_layers = len(filter_f)
 
-        c_ops       = [u**delta for u in self._get_coupling_layer(coupling_geometry, coupling_ops, theta)]
+        c_ops       = [u**delta for u in self._get_coupling_layer(coupling_geometry, coupling_ops, theta, params)]
         reset_layer = self._reset_layer
 
         cycle = cirq.Circuit()
+        cycle.append(self._pre_cycle_layer(params))
 
         if self.trotter_order == 1:
             sys_ops  = [u**delta for u in self.model.get_system_layer(order=1)]
-            bath_ops = [u**delta for u in self._get_bath_layer(h)]
+            bath_ops = [u**delta for u in self._get_bath_layer(h, params)]
             for j in range(n_layers):
                 cycle.append(sys_ops)
                 cycle.append(bath_ops)
@@ -201,7 +219,7 @@ class GroundStateProtocol(Protocol):
             sys_layer = self.model.get_system_layer(order=2)
             sys_full  = [u**delta       for u in sys_layer]
             sys_half  = [u**(delta / 2) for u in sys_layer]
-            bath_half = [u**(delta / 2) for u in self._get_bath_layer(h)]
+            bath_half = [u**(delta / 2) for u in self._get_bath_layer(h, params)]
 
             cycle.append(sys_half)
             for j in range(n_layers):
