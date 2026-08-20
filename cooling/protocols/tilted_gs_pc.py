@@ -3,9 +3,20 @@ Tilted staggered coupling frame for the ground-state protocol.
 
 TiltedGroundStateProtocol is a GroundStateProtocol whose extraction axis on
 system site i is rotated to cos(phi) z + s_i sin(phi) x, with the sublattice
-sign s_i from a 2-colouring of the bond graph. The bath field and the bath
-preparation are co-rotated, so the pumped quantity is the staggered order
-parameter rather than the total z magnetisation.
+sign s_i from a 2-colouring of the bond graph, so the pumped quantity is the
+staggered order parameter rather than the total z magnetisation.
+
+Only the system leg of the coupling is rotated. The iSWAP generator is
+    G = sigma+_i sigma-_b + sigma-_i sigma+_b,
+and the bath enters each cycle reset to |0>, so sigma-_b |0> = 0 leaves a single
+term: the extraction operator is sigma-_i, lowering along z. Conjugating the
+system leg by R(s_i phi) makes it sigma-_{n_i}, lowering along n_i, which is the
+whole effect. The original implementation also rotated the bath coupling leg,
+the bath Zeeman field and the bath preparation; that is a consistent basis
+change on a qubit which is reset on entry and traced out on exit, so it leaves
+the channel invariant (verified: fixed-point energy and ground-manifold weight
+agree to 1e-15 with and without it, over J/g = 1/0.5, 1/1, 0.5/1, trotter
+order 1 and 2, phi = 0 and 60 deg). It is omitted here.
 
 Motivation: the exchange coupling plus per-cycle reset is a one-way pump whose
 target is set by the quantisation axis. In the paramagnet the all-|0> target is
@@ -92,8 +103,7 @@ class TiltedGroundStateProtocol(GroundStateProtocol):
     Extra param (in addition to everything GroundStateProtocol takes):
         phi : float (default 0) — frame angle in radians. The extraction axis on
               system site i becomes cos(phi) z + s_i sin(phi) x with s_i the
-              sublattice sign; the bath field and bath preparation are co-rotated.
-              phi = 0 reproduces GroundStateProtocol exactly.
+              sublattice sign. phi = 0 reproduces GroundStateProtocol exactly.
 
     Useful in symmetry-broken phases, where pumping along the local order
     parameter rather than along z is what the dissipator should do.
@@ -123,25 +133,6 @@ class TiltedGroundStateProtocol(GroundStateProtocol):
             return float(self.params.get("phi", 0.))
         return float(params.get("phi", self.params.get("phi", 0.)))
 
-    def _pre_cycle_layer(self, params: dict):
-        """Prepare the bath in the ground state of the tilted field. Done at the START
-        of the cycle (not after the reset) so that the bath is left in a definite
-        computational state, which Simulation.get_system_state requires."""
-        phi = self._phi(params)
-        if abs(phi) < self._PHI_TOL:
-            return []
-        Rb = _frame_rotation(phi)
-        return [cirq.MatrixGate(Rb)(b) for b in self.device.bath_qubits]
-
-    def _get_bath_layer(self, h: float, params: dict = None):
-        """Zeeman splitting on the bath qubits, quantised along the frame axis
-        cos(phi) z + sin(phi) x."""
-        phi = self._phi(params)
-        if abs(phi) < self._PHI_TOL:
-            return super()._get_bath_layer(h, params)
-        R = _frame_rotation(phi)
-        return [_FramedGate(cirq.rz(-h), R)(b) for b in self.device.bath_qubits]
-
     def _get_coupling_layer(self, coupling_geometry: dict, coupling_ops: dict, theta: float,
                             params: dict = None):
         """
@@ -157,9 +148,9 @@ class TiltedGroundStateProtocol(GroundStateProtocol):
         B  = self.device.bath_qubits
         sb = self.coupling_gates(coupling_ops)
         signs = self.sublattice_signs
-        Rb = _frame_rotation(phi)
+        I2 = np.eye(2, dtype=complex)
         ops = []
         for bi, si in coupling_geometry.items():
-            RR = np.kron(_frame_rotation(phi, signs[si]), Rb)
+            RR = np.kron(_frame_rotation(phi, signs[si]), I2)
             ops.append(_FramedGate(sb[bi](exponent=2 / np.pi * theta), RR)(S[si], B[bi]))
         return ops

@@ -120,18 +120,8 @@ class GroundStateProtocol(Protocol):
         return np.sum([flist[t] * np.exp(1j * (h - omega) * delta * tlist[t]) for t in range(n)])
 
     # ── Circuit building helpers ──────────────────────────────────────────────
-    #
-    # The three methods below are the extension points used by subclasses that
-    # need to alter the gates or prepend content to a cycle (see
-    # TiltedGroundStateProtocol). Each receives the *resolved* params dict --
-    # self.params merged with any per-call override passed to channel() -- so a
-    # subclass sees per-call overrides rather than only the constructor values.
 
-    def _pre_cycle_layer(self, params: dict):
-        """Operations prepended once at the start of each cycle. Empty by default."""
-        return []
-
-    def _get_bath_layer(self, h: float, params: dict = None):
+    def _get_bath_layer(self, h: float):
         """Uniform Zeeman splitting on bath qubits. cirq: rz(-h) = exp(ih/2 Z)."""
         return [cirq.rz(-h)(b) for b in self.device.bath_qubits]
 
@@ -141,6 +131,10 @@ class GroundStateProtocol(Protocol):
         Coupling gates for all system-bath pairs.
         coupling_ops : {bath_idx: op_string} — 'X', 'Y', 'Z' per bath qubit.
         exponent = 2*theta/π so that gate**delta**f[j] → exp(-i·theta·delta·f[j]·OP).
+
+        params is the resolved param dict from channel() (self.params merged with any
+        per-call override). Unused here; it is the seam subclasses use to vary the
+        coupling per call -- see TiltedGroundStateProtocol.
         """
         S  = self.device.system_qubits
         B  = self.device.bath_qubits
@@ -205,11 +199,10 @@ class GroundStateProtocol(Protocol):
         reset_layer = self._reset_layer
 
         cycle = cirq.Circuit()
-        cycle.append(self._pre_cycle_layer(params))
 
         if self.trotter_order == 1:
             sys_ops  = [u**delta for u in self.model.get_system_layer(order=1)]
-            bath_ops = [u**delta for u in self._get_bath_layer(h, params)]
+            bath_ops = [u**delta for u in self._get_bath_layer(h)]
             for j in range(n_layers):
                 cycle.append(sys_ops)
                 cycle.append(bath_ops)
@@ -219,7 +212,7 @@ class GroundStateProtocol(Protocol):
             sys_layer = self.model.get_system_layer(order=2)
             sys_full  = [u**delta       for u in sys_layer]
             sys_half  = [u**(delta / 2) for u in sys_layer]
-            bath_half = [u**(delta / 2) for u in self._get_bath_layer(h, params)]
+            bath_half = [u**(delta / 2) for u in self._get_bath_layer(h)]
 
             cycle.append(sys_half)
             for j in range(n_layers):
