@@ -91,26 +91,13 @@ class Measurement:
 class DefaultMeasurement1(Measurement):
 
     """
-    simple measurement containing total spin, all-pairs two-site correlators,
-    and (zero-order trotter) Hamiltonian
+    simple measurement containing total spin, (zero-order trotter) Hamiltonian,
+    and <H^2> (for the energy variance Var(H) = <H^2> - <H>^2).
     """
     def __init__(self, device:"Device", model:"Model"):
         super().__init__(device)
         self.add_Hamiltonian(model)
         self.add_total_spin()
-
-
-class DefaultMeasurement2(DefaultMeasurement1):
-
-    """
-    as DefaultMeasurement1, plus local single-site <X_k>, <Y_k>, <Z_k> for every
-    system qubit k, spin-spin correlators <X_kX_j>, <Y_kY_j>, <Z_kZ_j>, and
-    <H^2> 
-    """
-    def __init__(self, device:"Device", model:"Model"):
-        super().__init__(device, model)
-        self.add_local_Sops()
-        self.add_spinspin_correlators()
         self._H_hsq = model.hamiltonian
 
     def measure_from_state_vector(self, state):
@@ -119,6 +106,18 @@ class DefaultMeasurement2(DefaultMeasurement1):
         phi = self._apply_pauli_sum(self._H_hsq, psi)   # H|psi>
         measurement['Hsq'] = float(np.sum(np.abs(phi) ** 2))   # <psi|H^2|psi> = ||H|psi>||^2
         return measurement
+
+
+class DefaultMeasurement2(DefaultMeasurement1):
+
+    """
+    as DefaultMeasurement1, plus local single-site <X_k>, <Y_k>, <Z_k> for every
+    system qubit k, and spin-spin correlators <X_kX_j>, <Y_kY_j>, <Z_kZ_j>.
+    """
+    def __init__(self, device:"Device", model:"Model"):
+        super().__init__(device, model)
+        self.add_local_Sops()
+        self.add_spinspin_correlators()
 
 
 
