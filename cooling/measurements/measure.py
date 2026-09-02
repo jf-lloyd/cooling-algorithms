@@ -74,6 +74,41 @@ class Measurement:
         self.add_observable('total_S2', Stot2)
         return self
 
+    def add_JW_majorana_correlators(self):
+        """
+        Add the real 2L-Majorana covariance matrix for the Jordan-Wigner
+        fermionization of the qubit chain (system_qubits order fixes the JW
+        site order), defining per-site Majoranas
+            a_i = (prod_{l<i} Z_l) X_i,   b_i = (prod_{l<i} Z_l) Y_i
+        and measuring M_{mu,nu} = i<gamma_mu gamma_nu> for every pair mu<nu
+        in the global ordering (a_0,b_0,a_1,b_1,...). Each entry reduces to a
+        single real Hermitian Pauli string (no complex bookkeeping needed):
+            M^aa_ij =  <Y_i S_ij X_j>
+            M^ab_ij =  <Y_i S_ij Y_j>
+            M^ba_ij = -<X_i S_ij X_j>
+            M^bb_ij = -<X_i S_ij Y_j>
+            M^ab_ii = -<Z_i>            (M^aa_ii = M^bb_ii = 0, not stored)
+        with S_ij = Z_{i+1}...Z_{j-1} (i<j). Validated against direct
+        Majorana-matrix construction for L<=6 (exact to machine precision,
+        see validate_jw_majorana.py).
+
+        The standard fermion correlators <c_i^dag c_j>, <c_i c_j> are
+        recovered losslessly at analysis time via
+            <c_i^dag c_j> = ((Mab_ij - Mba_ij) - i(Maa_ij + Mbb_ij)) / 4
+            <c_i c_j>     = ((Mab_ij + Mba_ij) + i(Mbb_ij - Maa_ij)) / 4
+        """
+        q = self.device.system_qubits
+        Ns = len(q)
+        for i in range(Ns):
+            self.add_observable(f'Mab_{i}_{i}', -cirq.Z(q[i]))
+            for j in range(i + 1, Ns):
+                s = cirq.PauliString({q[l]: cirq.Z for l in range(i + 1, j)})
+                self.add_observable(f'Maa_{i}_{j}',  cirq.Y(q[i]) * s * cirq.X(q[j]))
+                self.add_observable(f'Mab_{i}_{j}',  cirq.Y(q[i]) * s * cirq.Y(q[j]))
+                self.add_observable(f'Mba_{i}_{j}', -cirq.X(q[i]) * s * cirq.X(q[j]))
+                self.add_observable(f'Mbb_{i}_{j}', -cirq.X(q[i]) * s * cirq.Y(q[j]))
+        return self
+
     def add_spinspin_correlators(self):
         """
         Add all-pairs two-site correlators <X_iX_j>, <Y_iY_j>, <Z_iZ_j> 
@@ -119,6 +154,19 @@ class DefaultMeasurement2(DefaultMeasurement1):
         self.add_local_Sops()
         self.add_spinspin_correlators()
 
+
+
+class DefaultMeasurement4(DefaultMeasurement1):
+
+    """
+    as DefaultMeasurement1 (total spin, H0, Hsq), plus the full real
+    2L-Majorana JW covariance matrix (see add_JW_majorana_correlators),
+    for reconstructing free-fermion quasiparticle occupations <n_k> in
+    models with a known JW mapping (e.g. TFIM).
+    """
+    def __init__(self, device:"Device", model:"Model"):
+        super().__init__(device, model)
+        self.add_JW_majorana_correlators()
 
 
 class DefaultMeasurement3(DefaultMeasurement1):
