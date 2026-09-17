@@ -49,7 +49,7 @@ class DetailedBalanceProtocol(Protocol):
         p = self.params
         parts = []
         for key, fmt in [('beta', 'b{:.2f}'), ('delta', 'd{:.4f}'),
-                         ('h', 'h{:.2f}'), ('theta', 'th{:.3f}')]:
+                         ('N', 'N{:.0f}'), ('h', 'h{:.2f}'), ('theta', 'th{:.3f}')]:
             if key in p:
                 parts.append(fmt.format(p[key]))
         p2 = getattr(self.noise_model, 'p2', 0.)
@@ -66,22 +66,35 @@ class DetailedBalanceProtocol(Protocol):
 
     # ── Filter functions ──────────────────────────────────────────────────────
 
-    def gaussian_filter_function(self, beta:float, delta:float, h:float, NT:int):
-        """Gaussian detailed balance filter — width ~ sqrt(beta/h)."""
+    # All filters share the signature (beta, delta, h, N) and return a normalised
+    # array f of length N exactly, centered symmetrically about t=0: integer-spaced
+    # (t=-M..M) for odd N, half-integer-spaced (no sample exactly at t=0) for even N.
+    # This matches GroundStateProtocol, where N is likewise the circuit depth.
+    #
+    # N is the depth, not a truncation seed: it replaces the old NT, for which the
+    # depth was the derived quantity max(NT, NT*beta/delta) and so could not be set
+    # directly.  Truncating a filter to N samples is an approximation -- for mcp in
+    # particular the sinc/sinh tail is cut, which rounds the frequency-domain step
+    # and, once N falls well short of beta/delta, introduces ringing.
+
+    @staticmethod
+    def _tlist(N:int):
+        return np.arange(N) - (N - 1) / 2
+
+    def gaussian_filter_function(self, beta:float, delta:float, h:float, N:int):
+        """Gaussian detailed balance filter — width ~ sqrt(beta/h). Length N."""
         a  = delta * np.sqrt(abs(4 * h / beta))
-        MT = max(int(NT), int(NT / a))
-        f  = np.array([np.exp(-a**2 * t**2 / 2) for t in np.arange(-MT, MT + 1)])
+        f  = np.exp(-a**2 * self._tlist(N)**2 / 2)
         f /= delta * np.sum(np.abs(f))
         return f
 
-    def mcp_filter_function(self, beta:float, delta:float, h:float, NT:int):
-        """Modulated coupling pulse (sinc/sinh step-function filter)."""
+    def mcp_filter_function(self, beta:float, delta:float, h:float, N:int):
+        """Modulated coupling pulse (sinc/sinh step-function filter). Length N."""
         if not np.isclose(h, np.pi / 2):
             raise ValueError(f"mcp requires h=π/2, got h={h:.4f}")
-        MT = max(int(NT), int(NT * beta / delta))
-        f  = []
-        for t in np.arange(-MT, MT + 1):
-            if t == 0:
+        f = []
+        for t in self._tlist(N):
+            if t == 0:  # 0/0 limit, only hit for odd N
                 f.append(0.5)
             else:
                 f.append(np.sin(np.pi * t / 2) / np.sinh(delta * np.pi * t / beta) * delta / beta)
@@ -91,12 +104,12 @@ class DetailedBalanceProtocol(Protocol):
 
     def fourier_filter_function(self, omega:float, flist, h, delta):
         """Fourier-transformed filter function."""
-        MT    = len(flist) // 2
-        tlist = np.arange(-MT, MT + 1)
+        n     = len(flist)
+        tlist = self._tlist(n)
         if self.function == "mcp": # don't multiply h by delta
-            return np.sum([flist[t] * np.exp(1j * (h - omega * delta ) * tlist[t]) for t in range(len(tlist))])
+            return np.sum([flist[t] * np.exp(1j * (h - omega * delta ) * tlist[t]) for t in range(n)])
         else:
-            return np.sum([flist[t] * np.exp(1j * (h - omega) * delta * tlist[t]) for t in range(len(tlist))])
+            return np.sum([flist[t] * np.exp(1j * (h - omega) * delta * tlist[t]) for t in range(n)])
 
     # ── Circuit building helpers ──────────────────────────────────────────────
 
@@ -128,14 +141,18 @@ class DetailedBalanceProtocol(Protocol):
         coupling_geometry : dict {bath_idx: sys_idx}
         coupling_ops      : dict {bath_idx: op_string}, op_string in {'X', 'Y', 'Z'}
         params:
-            Required (structural — set circuit depth, must be real):
+            Required:
                 beta   : float — inverse target temperature
                 delta  : float — Trotter angle
-                h      : float — bath splitting
+                h      : float — bath splitting (mcp requires h = π/2)
+                N      : int — circuit depth (number of filter layers); the filter
+                         is returned with exactly N samples
                 theta  : float — coupling strength
-            Optional:
-                NT     : float (default 5) — filter truncation / circuit depth
-                         (non-integer allowed; MT floors it, then extends via 1/a)
+
+        N is the depth directly, matching GroundStateProtocol. It replaces the old
+        NT, for which the depth was the derived quantity max(NT, NT*beta/delta)
+        (mcp) or max(NT, NT/a) (gaussian) and so could not be set independently of
+        beta and delta -- passing an old NT value as N is not equivalent.
 
         trotter_order (set in __init__, default 1):
             1 — first-order (Lie-Trotter) split: sys(δ) -> bath(δ) -> coupling(δ·f[j])
@@ -152,11 +169,11 @@ class DetailedBalanceProtocol(Protocol):
         beta  = self.require_real(params, "beta")
         delta = self.require_real(params, "delta")
         h     = self.require_real(params, "h")
-        NT    = self.require_real(params, "NT", default=5)
+        N     = self.require_int(params, "N")
         theta = self.get_param(params, "theta")
 
-        filter_f = self.filter_function(beta, delta, h, NT)
-        MT       = len(filter_f) // 2
+        filter_f = self.filter_function(beta, delta, h, N)
+        n_layers = len(filter_f)
 
         c_ops = [u**delta for u in self._get_coupling_layer(coupling_geometry, coupling_ops, theta)]
         reset_layer = self._reset_layer
@@ -170,7 +187,7 @@ class DetailedBalanceProtocol(Protocol):
             else:
                 bath_ops = [u**delta for u in self._get_bath_layer(h)]
 
-            for j in range(2 * MT + 1):
+            for j in range(n_layers):
                 cycle.append(sys_ops)
                 cycle.append(bath_ops)
                 cycle.append(u**filter_f[j] for u in c_ops)
@@ -184,13 +201,12 @@ class DetailedBalanceProtocol(Protocol):
             else:
                 bath_half = [u**(delta / 2) for u in self._get_bath_layer(h)]
 
-            N = 2 * MT + 1
             cycle.append(sys_half)
-            for j in range(N):
+            for j in range(n_layers):
                 cycle.append(bath_half)
                 cycle.append(u**filter_f[j] for u in c_ops)
                 cycle.append(bath_half)
-                cycle.append(sys_full if j < N - 1 else sys_half)
+                cycle.append(sys_full if j < n_layers - 1 else sys_half)
 
         cycle.append(reset_layer)
 
