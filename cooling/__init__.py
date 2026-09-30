@@ -1,6 +1,6 @@
 from .lattices import Lattice, ChainLattice1D, SquareLattice2D, TriangularLattice2D, GraphLattice
 from .device import CoolingDevice
-from .models import Model, IsingModel, HeisenbergModel, XYModel
+from .models import Model, IsingModel, HeisenbergModel, XYModel, WillowXXZModel
 try:
     from .ed import ModelSpec, ThermalEnergy, SpinObservables, SpinSpinCorrelators
 except ImportError:
