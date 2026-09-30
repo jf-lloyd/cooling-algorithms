@@ -29,6 +29,11 @@ class Model(ABC):
         model.system_layer_o2        : second-order symmetric Trotter list of Cirq gates for one system evolution step
     """
 
+    # Models whose system layer is already expressed in a native gate set set this
+    # False; protocol channels then skip retargeting to CZs whatever compile they
+    # were called with.
+    allow_compile = True
+
     # Maps operator strings to Cirq gate constructors.
     # Two-site: gate(strength) returns a gate implementing exp(-i strength PP).
     # One-site:  gate(strength) returns a gate implementing exp(-i strength P).

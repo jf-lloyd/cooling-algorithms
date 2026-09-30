@@ -235,7 +235,7 @@ class GroundStateProtocol(Protocol):
             n_after = self._gate_count(cycle)
             if self.verbose:
                 print(f"drop negligible operations -- removed {n_before - n_after} gates")
-        if compile:
+        if compile and getattr(self.model, 'allow_compile', True):
             gateset = cirq.CZTargetGateset(allow_partial_czs=True)
             cycle = cirq.optimize_for_target_gateset(cirq.Circuit(cycle), gateset=gateset)
             n_before = self._gate_count(cycle)
