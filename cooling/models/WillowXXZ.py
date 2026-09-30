@@ -33,7 +33,6 @@ Created by Jerome Lloyd on 30th September 2026
 """
 
 import cirq
-import cirq_google
 import numpy as np
 
 from .modelbase import Model
@@ -41,9 +40,26 @@ from .modelbase import Model
 # Nominal Willow parameters. The cirq_google docstring warns that phi drifts
 # from processor to processor and that the gate is retargeted to an
 # "ISWAP-like" gate on hardware, so Delta = 1/9 is nominal, not guaranteed.
-WILLOW_THETA = float(cirq_google.ops.WILLOW.theta)   # pi/2
-WILLOW_PHI   = float(cirq_google.ops.WILLOW.phi)     # pi/9
+#
+# cirq_google.ops.WILLOW is exactly FSimGate(pi/2, pi/9), so the gate is built
+# from plain cirq here and cirq_google is not a dependency of this module --
+# importing it drags in the google-cloud engine stack, which is not installed
+# (or not importable) in every environment we simulate in. Where it IS
+# importable we take the values from it, so that a future change to the
+# nominal phi propagates.
+WILLOW_THETA = np.pi / 2
+WILLOW_PHI   = np.pi / 9
+try:  # pragma: no cover - depends on local cirq_google install
+    import cirq_google as _cg
+    WILLOW_THETA = float(_cg.ops.WILLOW.theta)
+    WILLOW_PHI   = float(_cg.ops.WILLOW.phi)
+except Exception:
+    pass
+
 WILLOW_DELTA = WILLOW_PHI / (2 * WILLOW_THETA)       # 1/9
+
+#: The Willow entangler, equal to cirq_google.ops.WILLOW.
+WILLOW = cirq.FSimGate(theta=WILLOW_THETA, phi=WILLOW_PHI)
 
 
 class WillowXXZModel(Model):
@@ -117,7 +133,7 @@ class WillowXXZModel(Model):
             for layer in self._lattice.bond_colouring():
                 group = []
                 for u, v in layer:
-                    group.append(cirq_google.ops.WILLOW(qubits[u], qubits[v])**s)
+                    group.append(WILLOW(qubits[u], qubits[v])**s)
                     group.append(self._GATE_MAP['Z'](g_comp)(qubits[u]))
                     group.append(self._GATE_MAP['Z'](g_comp)(qubits[v]))
                 if group:
