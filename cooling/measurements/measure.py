@@ -1,4 +1,7 @@
+import itertools
 import numpy as np
+import scipy.linalg as sl
+import scipy.sparse as sp
 import cirq
 
 class Measurement:
@@ -217,3 +220,203 @@ class DefaultMeasurement3(DefaultMeasurement1):
             measurement[f"pE_M{M:+.1f}"] = float(np.sum(w[mask]).real)
         return measurement
 
+
+
+# ── Commutator diagnostics:  <i[K, O]>  for K = H, H_F^(1), H_F (exact) ─────────
+
+class _PauliTable:
+    """
+    Fast evaluation of many Pauli-string expectations on one state vector.
+
+    A Pauli string P on n qubits (cirq big-endian: qubit i <-> bit n-1-i of the
+    basis index) acts on a basis state as
+        P|b> = i^{n_Y} (-1)^{popcount(b & zmask)} |b XOR xmask>,
+    with xmask the X/Y sites and zmask the Z/Y sites. So
+        <phi|P|psi> = i^{n_Y} sum_b conj(phi[b ^ xmask]) (-1)^{popcount(b & zmask)} psi[b],
+    a gather plus a sign, vectorised over the 2^n basis states.
+    Each distinct string is stored once; observables are linear combinations,
+    combined with a dense (n_obs x n_strings) coefficient matrix.
+    """
+    def __init__(self, qubits):
+        self.qubits = list(qubits); self.n = len(self.qubits)
+        self.pos = {q: i for i, q in enumerate(self.qubits)}
+        b = np.arange(2 ** self.n)
+        self._bits = ((b[:, None] >> (self.n - 1 - np.arange(self.n))[None, :]) & 1).astype(np.int8)
+        self.keys, self._index, self.xidx, self.zsgn, self.ph = [], {}, [], [], []
+
+    def key_of(self, ps: cirq.PauliString):
+        return tuple(sorted((self.pos[q], str(p)) for q, p in ps.items()))
+
+    def add_string(self, ps: cirq.PauliString) -> int:
+        k = self.key_of(ps)
+        if k in self._index:
+            return self._index[k]
+        xm, zsites, ny = 0, [], 0
+        for i, p in k:
+            bit = 1 << (self.n - 1 - i)
+            if p in ("X", "Y"): xm |= bit
+            if p in ("Z", "Y"): zsites.append(i)
+            if p == "Y": ny += 1
+        sgn = 1 - 2 * (self._bits[:, zsites].sum(1) & 1) if zsites else np.ones(2 ** self.n, dtype=np.int8)
+        self._index[k] = len(self.keys); self.keys.append(k)
+        self.xidx.append(np.arange(2 ** self.n) ^ xm); self.zsgn.append(sgn.astype(np.float64)); self.ph.append(1j ** ny)
+        return self._index[k]
+
+    def finalize(self):
+        self.xidx = np.array(self.xidx); self.zsgn = np.array(self.zsgn); self.ph = np.array(self.ph)
+
+    def overlaps(self, phi, psi):
+        """<phi|P_s|psi> for every stored string s (vector of length n_strings)."""
+        return self.ph * np.einsum("sb,sb->s", np.conj(phi)[self.xidx], self.zsgn * psi[None, :])
+
+
+def pauli_generator(op, delta):
+    """
+    Hermitian generator G (as a cirq.PauliSum) of a gate op with op = exp(-i delta G),
+    from the principal matrix log on the gate's own qubits, expanded in Pauli strings
+    (identity component dropped). Assumes the eigenphases of op lie in (-pi, pi).
+    """
+    qs = list(op.qubits); k = len(qs)
+    G = 1j * sl.logm(cirq.unitary(op)) / delta
+    out = cirq.PauliSum()
+    for labels in itertools.product("IXYZ", repeat=k):
+        if all(l == "I" for l in labels):
+            continue
+        ps = cirq.PauliString({q: getattr(cirq, l) for q, l in zip(qs, labels) if l != "I"})
+        c = np.trace(ps.matrix(qubits=qs) @ G) / 2 ** k
+        if abs(c) > 1e-12:
+            out += float(np.real(c)) * ps
+    return out
+
+
+def floquet1_hamiltonian(model, delta, check=True):
+    """
+    First-order BCH Floquet Hamiltonian of ONE first-order Trotter system layer,
+        U_F = U_n ... U_1,   U_j = exp(-i delta G_j)   (layer order = model.get_system_layer(order=1)),
+        H_F^(1) = sum_j G_j - (i delta / 2) sum_{j<k} [G_k, G_j],
+    returned as a local cirq.PauliSum. With check=True, asserts sum_j G_j == model.hamiltonian.
+    """
+    layer = [u ** delta for u in model.get_system_layer(order=1)]
+    Gs = [pauli_generator(op, delta) for op in layer]
+    H0 = cirq.PauliSum()
+    for G in Gs:
+        H0 += G
+    if check:
+        diff = H0 - model.hamiltonian
+        resid = max([abs(t.coefficient) for t in diff if t.qubits] + [0.0])
+        if resid > 1e-8:
+            raise ValueError(f"sum of layer generators differs from model.hamiltonian (max |coeff| {resid:.2e}); "
+                             "check the system layer / delta convention")
+    HF = H0
+    for k in range(len(Gs)):
+        for j in range(k):
+            HF += -0.5j * delta * (Gs[k] * Gs[j] - Gs[j] * Gs[k])
+    return _clean_pauli_sum(HF)
+
+
+def floquet_exact_matrix(model, delta, qubits, margin=0.3):
+    """
+    Exact Floquet Hamiltonian H_F = (i/delta) log U_F of one first-order Trotter system layer, as a dense
+    matrix on `qubits` (big-endian), with the branch cut in the largest gap of the eigenphases and the
+    trace fixed to that of H. Raises if spectral_width * delta >= 2 pi - margin (no unique branch).
+    """
+    H = model.hamiltonian.matrix(qubits=qubits); w = np.linalg.eigvalsh(H)
+    if (w[-1] - w[0]) * delta >= 2 * np.pi - margin:
+        raise ValueError(f"spectral width * delta = {(w[-1] - w[0]) * delta:.2f} >= 2pi - {margin}: "
+                         "the Floquet Hamiltonian has no unique branch; use the first-order (BCH) H_F instead")
+    UF = cirq.Circuit([u ** delta for u in model.get_system_layer(order=1)]).unitary(qubit_order=qubits)
+    ev, V = np.linalg.eig(UF); ph = np.angle(ev); sp = np.sort(ph)
+    gp = np.diff(np.r_[sp, sp[0] + 2 * np.pi]); k = int(np.argmax(gp)); cut = sp[k] + gp[k] / 2
+    th = np.mod(ph - cut, 2 * np.pi) + cut
+    HF = V @ np.diag(-th / delta) @ np.linalg.inv(V); HF = (HF + HF.conj().T) / 2
+    return HF + (np.trace(H) - np.trace(HF)).real / len(H) * np.eye(len(H))
+
+
+def _clean_pauli_sum(ps, tol=1e-12):
+    out = cirq.PauliSum()
+    for t in ps:
+        if t.qubits and abs(t.coefficient) > tol:
+            out += t
+    return out
+
+
+class CommutatorMeasurement(DefaultMeasurement2):
+    """
+    DefaultMeasurement2 plus commutator diagnostics of 'diagonality' of the state.
+
+    If rho commutes with K, then C_O = <i[K, O]> = -i Tr([K, rho] O) = 0 for EVERY O; this needs
+    no temperature fit, and since it is linear in rho the trajectory average is the ensemble value.
+    Equivalently <i[K, O]> = d<O>/dt under K alone, so in a boundary-cooled steady state nonzero
+    values near the ancillas are the Hamiltonian currents that balance the dissipation.
+
+    O runs over the full local set: all single-site Paulis P_k (3 Ns) and all two-site products
+    P_i Q_j, P, Q in {X, Y, Z}, i < j (9 Ns(Ns-1)/2). (For a real H and O with no Y, i[H, O] is
+    imaginary and only probes Im rho; the Y-containing O probe the real off-diagonals.)
+
+    Columns, with Oname = f"{P}_{k}" or f"{P}{Q}_{i}_{j}":
+        cH_<Oname>     K = model.hamiltonian
+        cHF1_<Oname>   K = first-order BCH Floquet Hamiltonian of one Trotter system layer at DELTA
+        cHFx_<Oname>   K = exact Floquet Hamiltonian (dense; only if EXACT_FLOQUET, small Ns only,
+                       and only while spectral width * DELTA < 2 pi)
+
+    Configure by subclassing at MODULE level (so run_parallel can pickle it to spawned workers):
+        class M(cooling.CommutatorMeasurement):
+            DELTA = 0.1             # Trotter step of the system layer (GS protocol: 2T/N; DB: delta)
+            EXACT_FLOQUET = True    # optional dense exact-H_F commutators
+        Simulation(protocol, measurement=M)
+    Assumes the protocol uses the first-order (trotter_order=1) system layer for H_F.
+    """
+    DELTA = None
+    BCH_FLOQUET = True
+    EXACT_FLOQUET = False
+
+    def __init__(self, device: "Device", model: "Model"):
+        super().__init__(device, model)
+        q = list(device.system_qubits); Ns = len(q)
+        self._obs = [(f"{a}_{k}", getattr(cirq, a)(q[k])) for k in range(Ns) for a in "XYZ"]
+        self._obs += [(f"{a}{b}_{i}_{j}", cirq.PauliString({q[i]: getattr(cirq, a), q[j]: getattr(cirq, b)}))
+                      for i in range(Ns) for j in range(i + 1, Ns) for a in "XYZ" for b in "XYZ"]
+        self._tab = _PauliTable(q)
+        Ks = [("cH", model.hamiltonian)]
+        if self.BCH_FLOQUET or self.EXACT_FLOQUET:
+            if self.DELTA is None:
+                raise ValueError("CommutatorMeasurement: set the class attribute DELTA (Trotter step) in a subclass")
+        if self.BCH_FLOQUET:
+            Ks.append(("cHF1", floquet1_hamiltonian(model, self.DELTA)))
+        self._blocks = []
+        for label, K in Ks:
+            rows = []
+            for name, O in self._obs:
+                C = _clean_pauli_sum(1j * (K * O - O * K))
+                terms = []
+                for t in C:
+                    c = complex(t.coefficient)
+                    assert abs(c.imag) < 1e-9, f"i[K,O] not Hermitian for {label}, {name}"
+                    terms.append((self._tab.add_string(t / c), c.real))
+                rows.append(terms)
+            self._blocks.append((label, rows))
+        self._obs_strings = [self._tab.add_string(cirq.PauliString(O) if not isinstance(O, cirq.PauliString) else O)
+                             for _, O in self._obs]
+        self._tab.finalize()
+        ns = len(self._tab.keys)
+        self._coef = {}                                              # sparse (n_obs x n_strings), ~1% filled
+        for label, rows in self._blocks:
+            r_, c_, v_ = [], [], []
+            for r, terms in enumerate(rows):
+                for s, c in terms:
+                    r_.append(r); c_.append(s); v_.append(c)
+            self._coef[label] = (sp.csr_matrix((v_, (r_, c_)), shape=(len(rows), ns)),
+                                 [f"{label}_{name}" for name, _ in self._obs])
+        self._HFx = floquet_exact_matrix(model, self.DELTA, q) if self.EXACT_FLOQUET else None
+        self._HFx_names = [f"cHFx_{name}" for name, _ in self._obs]
+
+    def measure_from_state_vector(self, state):
+        measurement = super().measure_from_state_vector(state)
+        psi = np.asarray(state).ravel().astype(np.complex128)
+        ev = np.real(self._tab.overlaps(psi, psi))                  # <psi|P_s|psi>, all strings at once
+        for M, names in self._coef.values():
+            measurement.update(zip(names, (M @ ev).tolist()))
+        if self._HFx is not None:                                   # <i[H_F,O]> = -2 Im <H_F psi | O psi>
+            a = self._tab.overlaps(self._HFx @ psi, psi)[self._obs_strings]
+            measurement.update(zip(self._HFx_names, (-2 * np.imag(a)).tolist()))
+        return measurement
